@@ -64,14 +64,6 @@ process ragtagScaffold {
     path "minimapRagTag/ragtag.scaffold.agp", emit: scaffold_agp
     path corrected_contigs, emit: corrected_contigs
 
-    //  ragtag.py scaffold reference_genome.fna megahit_output_final.contigs.fa
-            // -o ragtag_output
-            // -f 50
-            // --remove-small
-            // -C
-            // -w
-            // --aligner nucmer --nucmer-params '--mum -l 20 -c 65'
-
     script:
     """
     source $params.conda_shell
