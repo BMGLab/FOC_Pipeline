@@ -27,7 +27,7 @@ process Bowtie2 {
 
 process BCFtools {
     tag "$id"
-    publishDir "${params.outdir}/bcftools", mode: 'copy'
+    publishDir "${params.output_dir}/bcftools/${id}", mode: 'copy'
 
     input:
     tuple val(id), path(bam), path(bai)
@@ -54,9 +54,10 @@ process BCFtools {
 }
 
 process SnpEff {
-    publishDir "${params.output_dir}/snpeff", mode: 'copy'
+    tag "$id"
+    publishDir "${params.output_dir}/snpeff/${id}", mode: 'copy'
     
-  input:
+    input:
     tuple val(id), path(vcf)
 
     output:
@@ -68,18 +69,17 @@ process SnpEff {
     script:
     """
     source $params.conda_shell
-    export JAVA_HOME=/Users/sercanozturk/miniconda3/envs/snpeff
+    export JAVA_HOME=${params.home}/miniconda3/envs/snpeff
     export JAVA_LD_LIBRARY_PATH=\${JAVA_LD_LIBRARY_PATH:-}
     conda activate snpeff
-    export SNPEFF_JAR=/Users/sercanozturk/miniconda3/envs/snpeff/share/snpeff-5.2-1/snpEff.jar
+    export SNPEFF_JAR=${params.home}/miniconda3/envs/snpeff/share/snpeff-5.2-1/snpEff.jar
     java -jar \$SNPEFF_JAR databases | grep ${params.snpeff_db}
 
     java -Xmx8g -jar \$SNPEFF_JAR \
         -v ${params.snpeff_db} \
         -stats ${id}_snpEff_summary.html \
         -csvStats snpEff_summary.csv \
-        ${vcf} \
-        > ${id}_annotated.vcf
+        ${vcf} > ${id}_annotated.vcf
 
     grep -v "^#" ${id}_annotated.vcf | cut -f 8 | grep -o 'ANN=.*' | \
     sed 's/ANN=//g' | tr ',' '\\n' | cut -f 4 -d '|' | sort | uniq -c > snpEff_genes.txt
