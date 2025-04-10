@@ -1,0 +1,22 @@
+# Ignore data and outputs
+data/
+logs/
+tools/
+
+# Ignore documentation drafts
+docs/
+
+# Ignore temporary files
+*.Rhistory
+*.RData
+*.ipynb_checkpoints/
+*.log
+*.tmp
+*.bak
+
+# Ignore environment or cache
+.conda/
+.venv/
+__pycache__/
+.DS_Store
+

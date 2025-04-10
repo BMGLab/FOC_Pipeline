@@ -1,0 +1,12 @@
+{
+  "folders": [
+    { "path": "." },
+    { "path": "tools/my_tool" },
+    { "path": "scripts" },
+    { "path": "notebooks" }
+  ],
+  "settings": {
+    "python.pythonPath": "path/to/your/env/bin/python"
+  }
+}
+
