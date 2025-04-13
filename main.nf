@@ -321,7 +321,7 @@ process DBSCAN {
     """
     source $params.conda_shell
     conda activate dbscan
-    python params.dbscan \
+    python $params.dbscan \
         --input ${gff} \
         --output clustered_genes.tsv \
         --eps 1000 \
