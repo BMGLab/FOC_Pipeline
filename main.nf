@@ -209,7 +209,7 @@ process McClintock {
     cleaned_consensus = clean_fasta_headers("${consensus}")
     EOF
 
-    python /home/sercanozturk/McClintock/mcclintock.py \
+    python $params.mcclintock \
         --reference ${reference} \
         --consensus ${consensus}_cleaned \
         --first ${read1} \
@@ -321,7 +321,7 @@ process DBSCAN {
     """
     source $params.conda_shell
     conda activate dbscan
-    python ${params.project_root}/modules/dbscan.py \
+    python params.dbscan \
         --input ${gff} \
         --output clustered_genes.tsv \
         --eps 1000 \
@@ -394,7 +394,7 @@ process TargetP {
     script:
     """
     source $params.conda_shell
-    /home/sercanozturk/targetp-2.0/bin/targetp \
+    $params.targetp \
         -fasta $protein_fasta \
         -format short \
         -org non-pl \
