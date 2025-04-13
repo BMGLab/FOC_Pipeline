@@ -1,7 +1,8 @@
 #!/usr/bin/env nextflow
-include { fastqc } from './modules/fastqc.nf'
+include { FastQC } from './modules/fastqc.nf'
 include { preprocess_assembly } from './workflows/preprocess_assembly.nf'
 include { alignment_variant_calling } from './workflows/alignment_variant_calling.nf'
+include { QUAST } from './modules/quast.nf'
 
 nextflow.enable.dsl=2
 
@@ -9,6 +10,8 @@ nextflow.enable.dsl=2
 // source /home/sercanozturk/miniconda3/etc/profile.d/conda.sh
 
 process inspectReads {
+    tag "$id"
+
     input:
     tuple val(id), path(read1), path(read2)
     path reference
@@ -21,7 +24,7 @@ process inspectReads {
     """
 }
 
-process BLASTSearch {
+process BLASTn {
     tag "$id"
     publishDir "${params.output_dir}/blast/${id}", mode: 'copy'
 
@@ -69,22 +72,35 @@ process BLASTSearch {
 
 process appendContigs {
     tag "$id"
+    publishDir "${params.output_dir}/appended_contigs/${id}", mode: 'copy'
 
     input:
     val id
-    path scaffold
-    path unplaced
-    path blast
+    path blast_results
+    path chr0_fasta
+    path ragtag_scaffolds
 
     output:
-    val(id), emit: sample_id
-    path("final_scaffolds.fasta"), emit: final_scaffolds
+    val id, emit: sample_id
+    path "${id}_final_scaffolds.fasta", emit: final_scaffolds
 
     script:
     """
-    grep -E "^>" ${blast} | cut -f1 -d' ' > fusarium_contigs.txt
-    seqkit grep -f fusarium_contigs.txt ${unplaced} > fusarium_contigs.fasta
-    cat ${scaffold} fusarium_contigs.fasta > final_scaffolds.fasta
+    source $params.conda_shell
+    conda activate seqtk
+    # Filter the best hit per Chr0 contig by highest bit score
+    sort -k12,12nr $blast_results | awk '!seen[\$1]++' > best_hits.tsv
+
+    # Extract only those Chr0 contigs with valid BLAST placements
+    awk '{print \$1}' best_hits.tsv > filtered_chr0_ids.txt
+    seqtk subseq $chr0_fasta filtered_chr0_ids.txt > filtered_chr0.fasta
+
+    # Remove artificial Chr0 from ragtag scaffolds
+    seqkit grep -r -v -p 'Chr0_RagTag' $ragtag_scaffolds > cleaned_scaffolds.fasta
+
+    # Merge the filtered Chr0 contigs with cleaned scaffolds
+    cat cleaned_scaffolds.fasta filtered_chr0.fasta > ${id}_final_scaffolds.fasta
+    conda deactivate
     """
 }
 
@@ -158,7 +174,7 @@ process repeatMasker {
     """
 }
 
-process mcclintock {
+process McClintock {
     tag "$id"
     publishDir "${params.output_dir}/mcclintock/${id}", mode: 'copy'
 
@@ -171,7 +187,7 @@ process mcclintock {
     path locations
 
     output:
-    path "mcclintock_results/*", emit: results
+    path "out/*", emit: results
 
     script:
     """
@@ -193,18 +209,18 @@ process mcclintock {
     cleaned_consensus = clean_fasta_headers("${consensus}")
     EOF
 
-    python /home/sercanozturk/Fol_Nextflow_Pipeline/modules/McClintock/mcclintock.py \
+    python /home/sercanozturk/McClintock/mcclintock.py \
         --reference ${reference} \
         --consensus ${consensus}_cleaned \
         --first ${read1} \
         --second ${read2} \
-        --out mcclintock_results \
+        --out out \
         --proc 12
     conda deactivate
     """
 }
 
-process liftoff {
+process Liftoff {
     tag "$id"
     publishDir "${params.output_dir}/liftoff/${id}", mode: 'copy'
 
@@ -230,7 +246,7 @@ process liftoff {
     """
 }
 
-process antismash {
+process antiSMASH {
     tag "$id"
     publishDir "${params.output_dir}/antismash/${id}", mode: 'copy'
 
@@ -245,18 +261,24 @@ process antismash {
     script:
     """
     source $params.conda_shell
+    conda activate agat
+    agat_sp_manage_IDs.pl --gff ${gff3} -o ${id}_fixed_genes.gff
+    agat_sp_fix_cds_phases.pl --gff ${id}_fixed_genes.gff --fasta ${assembly} -o ${id}_fixed_genes_phased.gff
+    agat_sp_fix_features_locations_duplicated.pl --gff ${id}_fixed_genes_phased.gff -o ${id}_fixed_genes_phased_deduped.gff
+    agat_sp_keep_longest_isoform.pl -g ${id}_fixed_genes_phased_deduped.gff -o no_redundant_isoforms.gff
+    conda deactivate
     conda activate antismash
     antismash --taxon fungi \
                 --cpus 28 \
                 --output-dir ${id}_antismash_results \
                 --fullhmmer --clusterhmmer --cc-mibig --cb-general --cb-knownclusters \
-                --genefinding-gff3 ${gff3} \
+                --genefinding-gff3 no_redundant_isoforms.gff \
                 ${assembly}
     conda deactivate
     """
 }
 
-process blastp {
+process BLASTp {
     tag "$id"
     publishDir "${params.output_dir}/blastp/${id}", mode: 'copy'
 
@@ -283,7 +305,7 @@ process blastp {
     """
 }
 
-process dbscan {
+process DBSCAN {
     tag "$id"
     publishDir "${params.output_dir}/dbscan/${id}", mode: 'copy'
 
@@ -308,6 +330,123 @@ process dbscan {
     """
 }
 
+process extractProteins {
+    tag "$id"
+
+    input:
+    val id
+    path assembly
+    path gff
+
+    output:
+    val id, emit: sample_id
+    path "${id}_predicted_proteins.faa", emit: proteins
+
+    script:
+    """
+    source $params.conda_shell
+    conda activate agat
+    agat_sp_fix_cds_phases.pl \
+        --gff $gff \
+        --fasta ${assembly} \
+        -o ${id}_predicted_genes_fixed.gff
+    agat_sp_extract_sequences.pl \
+        --gff ${id}_predicted_genes_fixed.gff \
+        --fasta ${assembly} \
+        --type CDS \
+        --protein \
+        -o ${id}_predicted_proteins.faa
+    conda deactivate
+    """
+}
+
+process DeepTMHMM {
+    tag "$id"
+    publishDir "${params.output_dir}/deeptmhmm/${id}", mode: 'copy'
+
+    input:
+    val id
+    path protein_fasta
+
+    output:
+    path("${id}_tmhmm.out"), emit: tmhmm_out
+
+    script:
+    """
+    source $params.conda_shell
+    conda activate deeptmhmm
+    biolib run --local 'DTU/DeepTMHMM:1.0.24' --fasta ${protein_fasta} > ${id}_tmhmm.out
+    conda deactivate
+    """
+}
+
+process TargetP {
+    tag "$id"
+    publishDir "${params.output_dir}/targetp/${id}", mode: 'copy'
+
+    input:
+    val id
+    path protein_fasta
+
+    output:
+    path("${id}_targetp.gff3"), emit: targetp_gff
+
+    script:
+    """
+    source $params.conda_shell
+    /home/sercanozturk/targetp-2.0/bin/targetp \
+        -fasta $protein_fasta \
+        -format short \
+        -org non-pl \
+        -gff3 \
+        -mature \
+        -prefix ${id}_targetp
+    """
+}
+
+process Signalp {
+    tag "$id"
+    publishDir "${params.output_dir}/signalp/${id}", mode: 'copy'
+
+    input:
+    val id
+    path protein_fasta
+
+    output:
+    path("output/*"), emit: signalp_out
+
+    script:
+    """
+    source $params.conda_shell
+    conda activate signalp6
+    signalp6 \
+        --fastafile $protein_fasta \
+        --organism euk \
+        --output_dir output \
+        --format all \
+        --mode slow \
+        --model_dir ${params.home}/signalp6_slow_sequential/signalp-6-package/models/
+    conda deactivate
+    """
+}
+
+process WoLFPSort {
+    tag "$id"
+    publishDir "${params.output_dir}/wolfpsort/${id}", mode: 'copy'
+
+    input:
+    val id
+    path protein_fasta
+
+    output:
+    path("${id}_wolfpsort.txt"), emit: wolfpsort_out
+
+    script:
+    """
+    ${params.home}/WoLFPSort/bin/runWolfPsortSummary fungi < $protein_fasta > ${id}_wolfpsort.txt
+    """
+}
+
 workflow {
     Channel.fromPath(params.samplesheet_path)
         .splitCsv(header: true)
@@ -318,21 +457,29 @@ workflow {
     reference_fna = file("ref/GCF_000149955.1_ASM14995v2_genomic.fna")
     annotation = file("ref/GCF_000149955.1_ASM14995v2_genomic.gff")
     inspectReads(samples, reference)
-    fastqc(samples)
+    FastQC(samples)
 
     preprocess_assembly(samples, reference)
     alignment_variant_calling(samples, reference)
-    BLASTSearch(preprocess_assembly.out.sample_id, preprocess_assembly.out.chr0_contigs)
 
-    liftoff(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold, reference_fna, annotation)
-    dbscan(liftoff.out.sample_id, liftoff.out.genes_gff)
-    blastp(dbscan.out.sample_id, dbscan.out.clustered_genes)
-    antismash(liftoff.out.sample_id, liftoff.out.scaffold, liftoff.out.genes_gff)
+    BLASTn(preprocess_assembly.out.sample_id, preprocess_assembly.out.chr0_contigs)
+    appendContigs(BLASTn.out.sample_id, BLASTn.out.blast_results, preprocess_assembly.out.chr0_contigs, preprocess_assembly.out.scaffold)
+    QUAST(appendContigs.out.sample_id, appendContigs.out.final_scaffolds)
+    Liftoff(appendContigs.out.sample_id, appendContigs.out.final_scaffolds, reference_fna, annotation)
+    DBSCAN(Liftoff.out.sample_id, Liftoff.out.genes_gff)
+    BLASTp(DBSCAN.out.sample_id, DBSCAN.out.clustered_genes)
+    antiSMASH(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
 
     nucmerMummer(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold, reference_fna)
     repeatModeler(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold)
     repeatMasker(repeatModeler.out.sample_id, preprocess_assembly.out.scaffold, repeatModeler.out.repeat_lib)
-    // read1 = samples.map { it[1] }
-    // read2 = samples.map { it[2] }
-    // mcclintock(repeatMasker.out.sample_id, repeatMasker.out.masked_fasta, repeatModeler.out.repeat_lib, read1, read2, repeatMasker.out.masked_gff)
+    read1 = samples.map { it[1] }
+    read2 = samples.map { it[2] }
+    McClintock(repeatMasker.out.sample_id, repeatMasker.out.masked_fasta, repeatModeler.out.repeat_lib, read1, read2, repeatMasker.out.masked_gff)
+
+    extractProteins(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
+    DeepTMHMM(extractProteins.out.sample_id, extractProteins.out.proteins)
+    TargetP(extractProteins.out.sample_id, extractProteins.out.proteins)
+    Signalp(extractProteins.out.sample_id, extractProteins.out.proteins)
+    WoLFPSort(extractProteins.out.sample_id, extractProteins.out.proteins)
 }
