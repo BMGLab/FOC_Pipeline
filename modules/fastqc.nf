@@ -1,4 +1,5 @@
-process fastqc {
+// Nextflow script for running FastQC on paired-end sequencing data
+process FastQC {
     tag "$sample_id"
     publishDir "${params.output_dir}/fastqc", mode: 'copy'
 
