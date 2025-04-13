@@ -1,5 +1,6 @@
 include { fastp } from '../modules/fastp.nf'
-include { fastqc } from '../modules/fastqc.nf'
+include { FastQC } from '../modules/fastqc.nf'
+include { QUAST } from '../modules/quast.nf'
 include { samTools } from '../modules/samtools.nf'
 
 process megahitAssembly {
@@ -76,7 +77,6 @@ process ragtagScaffold {
     minimapRagTag/ragtag.scaffold_unplaced.agp \
     ${corrected_contigs} \
     minimapRagTag/ragtag.scaffold_unplaced.fasta
-    
     conda deactivate
     """
 }
@@ -135,30 +135,6 @@ process minimap2 {
     """
 }
 
-process quast {
-    tag "$id"
-    publishDir "${params.output_dir}/assembly_qc/${id}", mode: 'copy'
-
-    input:
-    val id
-    path contigs
-
-    output:
-    path "quast_output", emit: results
-
-    script:
-    """
-    source $params.conda_shell
-    export JAVA_HOME=\$HOME/miniconda3/envs/quast
-    export JAVA_LD_LIBRARY_PATH=\${JAVA_LD_LIBRARY_PATH:-}
-    conda activate quast
-    quast.py ${contigs} \
-             -o quast_output \
-             --fast
-    conda deactivate
-    """
-}
-
 workflow preprocess_assembly {
     take:
     samples
@@ -166,9 +142,9 @@ workflow preprocess_assembly {
 
     main:
     fastp(samples)
-    fastqc(samples)
+    FastQC(samples)
     megahit_out = megahitAssembly(fastp.out.trimmed_reads)
-    quast(megahit_out.sample_id, megahit_out.contigs)
+    QUAST(megahit_out.sample_id, megahit_out.contigs)
     ragtag_out = ragtagCorrect(megahit_out.sample_id, megahit_out.contigs, reference) | ragtagScaffold
     extractChr0Contigs(ragtag_out.sample_id, ragtag_out.scaffold_agp, ragtag_out.corrected_contigs)
     minimap2(ragtag_out.sample_id, ragtag_out.scaffold_fasta, reference)
