@@ -214,8 +214,9 @@ process McClintock {
         --consensus ${consensus}_cleaned \
         --first ${read1} \
         --second ${read2} \
-        --out out \
         --proc 12
+        --out out \
+        --methods ngs_te_mapper2,relocate2,tebreak
     conda deactivate
     """
 }
@@ -478,7 +479,8 @@ workflow {
     McClintock(repeatMasker.out.sample_id, repeatMasker.out.masked_fasta, repeatModeler.out.repeat_lib, read1, read2, repeatMasker.out.masked_gff)
 
     extractProteins(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
-    DeepTMHMM(extractProteins.out.sample_id, extractProteins.out.proteins)
+    if (params.skip_deeptmhmm) { println "Skipping DeepTMHMM" }
+    else { DeepTMHMM(extractProteins.out.sample_id, extractProteins.out.proteins) }
     TargetP(extractProteins.out.sample_id, extractProteins.out.proteins)
     Signalp(extractProteins.out.sample_id, extractProteins.out.proteins)
     WoLFPSort(extractProteins.out.sample_id, extractProteins.out.proteins)
