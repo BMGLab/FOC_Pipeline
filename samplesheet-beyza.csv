@@ -1,0 +1,7 @@
+sample_id,read1,read2
+34,/mnt/ssd0/Fusarium-WGS/34/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050207-84_1.fq.gz,/mnt/ssd0/Fusarium-WGS/34/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050207-84_2.fq.gz
+35,/mnt/ssd0/Fusarium-WGS/35/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050208-85_1.fq.gz,/mnt/ssd0/Fusarium-WGS/35/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050208-85_2.fq.gz
+36,/mnt/ssd0/Fusarium-WGS/36/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050209-86_1.fq.gz,/mnt/ssd0/Fusarium-WGS/36/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050209-86_2.fq.gz
+37,/mnt/ssd0/Fusarium-WGS/37/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050210-88_1.fq.gz,/mnt/ssd0/Fusarium-WGS/37/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050210-88_2.fq.gz
+38,/mnt/ssd0/Fusarium-WGS/38/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050211-90_1.fq.gz,/mnt/ssd0/Fusarium-WGS/38/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050211-90_2.fq.gz
+

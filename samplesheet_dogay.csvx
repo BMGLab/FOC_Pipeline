@@ -1,0 +1,3 @@
+sample_id,read1,read2
+13,/mnt/ssd0/nextflow_workspace/sample_reads/13/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050186-50_1.fq.gz,/mnt/ssd0/nextflow_workspace/sample_reads/13/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050186-50_2.fq.gz
+39,/mnt/ssd0/nextflow_workspace/sample_reads/39/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050212-92_1.fq.gz,/mnt/ssd0/nextflow_workspace/sample_reads/10/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050212-92_2.fq.gz

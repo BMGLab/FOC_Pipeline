@@ -1,0 +1,4 @@
+sample_id,read1,read2
+12,/mnt/ssd0/Fusarium-WGS/12/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050185-45_1.fq.gz,/mnt/ssd0/Fusarium-WGS/12/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050185-45_2.fq.gz
+14,/mnt/ssd0/Fusarium-WGS/14/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050187-52_1.fq.gz,/mnt/ssd0/Fusarium-WGS/14/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050187-52_2.fq.gz
+
