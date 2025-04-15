@@ -26,7 +26,7 @@ process inspectReads {
 
 process BLASTn {
     tag "$id"
-    publishDir "${params.output_dir}/blast/${id}", mode: 'copy'
+    publishDir "${params.output_dir}/blastn/${id}", mode: 'copy'
 
     input:
     val(id)
@@ -247,6 +247,41 @@ process Liftoff {
     """
 }
 
+process AUGUSTUS {
+    tag "$id"
+    publishDir "${params.output_dir}/augustus/${id}", mode: 'copy'
+
+    input:
+    val id
+    path assembly
+
+    output:
+    val id, emit: sample_id
+    path "${id}_augustus_predictions.gff", emit: genes_gff
+    path assembly, emit: scaffold
+    path "${id}_augustus_predictions.aa", emit: proteins_aa
+    path "${id}_augustus_predictions.faa", emit: proteins_faa
+
+    script:
+    """
+    source $params.conda_shell
+    conda activate augustus
+
+    # export AUGUSTUS_CONFIG_PATH="${params.augustus_config_path}"
+
+    augustus \
+        --species=fol \
+        --gff3=on \
+        --outfile=${id}_augustus_predictions.gff \
+        $assembly
+
+    perl getAnnoFasta.pl ${id}_augustus_predictions.gff
+    mv ${id}_augustus_predictions.aa ${id}_augustus_predictions.faa
+
+    conda deactivate
+    """
+}
+
 process antiSMASH {
     tag "$id"
     publishDir "${params.output_dir}/antismash/${id}", mode: 'copy'
@@ -306,9 +341,9 @@ process BLASTp {
     """
 }
 
-process DBSCAN {
+process dbCAN {
     tag "$id"
-    publishDir "${params.output_dir}/dbscan/${id}", mode: 'copy'
+    publishDir "${params.output_dir}/dbcan/${id}", mode: 'copy'
 
     input:
     val id
@@ -347,16 +382,19 @@ process extractProteins {
     """
     source $params.conda_shell
     conda activate agat
+
     agat_sp_fix_cds_phases.pl \
         --gff $gff \
         --fasta ${assembly} \
         -o ${id}_predicted_genes_fixed.gff
+
     agat_sp_extract_sequences.pl \
         --gff ${id}_predicted_genes_fixed.gff \
         --fasta ${assembly} \
         --type CDS \
         --protein \
         -o ${id}_predicted_proteins.faa
+
     conda deactivate
     """
 }
@@ -376,7 +414,9 @@ process DeepTMHMM {
     """
     source $params.conda_shell
     conda activate deeptmhmm
+
     biolib run --local 'DTU/DeepTMHMM:1.0.24' --fasta ${protein_fasta} > ${id}_tmhmm.out
+
     conda deactivate
     """
 }
@@ -467,21 +507,22 @@ workflow {
     appendContigs(BLASTn.out.sample_id, BLASTn.out.blast_results, preprocess_assembly.out.chr0_contigs, preprocess_assembly.out.scaffold)
     QUAST(appendContigs.out.sample_id, appendContigs.out.final_scaffolds)
     Liftoff(appendContigs.out.sample_id, appendContigs.out.final_scaffolds, reference_fna, annotation)
-    DBSCAN(Liftoff.out.sample_id, Liftoff.out.genes_gff)
-    BLASTp(DBSCAN.out.sample_id, DBSCAN.out.clustered_genes)
-    antiSMASH(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
+    AUGUSTUS(appendContigs.out.sample_id, appendContigs.out.final_scaffolds)
+    // dbCAN(Liftoff.out.sample_id, Liftoff.out.genes_gff)
+    // BLASTp(dbCAN.out.sample_id, dbCAN.out.clustered_genes)
+    // antiSMASH(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
 
-    nucmerMummer(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold, reference_fna)
-    repeatModeler(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold)
-    repeatMasker(repeatModeler.out.sample_id, preprocess_assembly.out.scaffold, repeatModeler.out.repeat_lib)
-    read1 = samples.map { it[1] }
-    read2 = samples.map { it[2] }
-    McClintock(repeatMasker.out.sample_id, repeatMasker.out.masked_fasta, repeatModeler.out.repeat_lib, read1, read2, repeatMasker.out.masked_gff)
+    // nucmerMummer(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold, reference_fna)
+    // repeatModeler(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold)
+    // repeatMasker(repeatModeler.out.sample_id, preprocess_assembly.out.scaffold, repeatModeler.out.repeat_lib)
+    // read1 = samples.map { it[1] }
+    // read2 = samples.map { it[2] }
+    // McClintock(repeatMasker.out.sample_id, repeatMasker.out.masked_fasta, repeatModeler.out.repeat_lib, read1, read2, repeatMasker.out.masked_gff)
 
-    extractProteins(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
+    // extractProteins(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
     if (params.skip_deeptmhmm) { println "Skipping DeepTMHMM" }
     else { DeepTMHMM(extractProteins.out.sample_id, extractProteins.out.proteins) }
-    TargetP(extractProteins.out.sample_id, extractProteins.out.proteins)
-    Signalp(extractProteins.out.sample_id, extractProteins.out.proteins)
-    WoLFPSort(extractProteins.out.sample_id, extractProteins.out.proteins)
+    // TargetP(extractProteins.out.sample_id, extractProteins.out.proteins)
+    // Signalp(extractProteins.out.sample_id, extractProteins.out.proteins)
+    // WoLFPSort(extractProteins.out.sample_id, extractProteins.out.proteins)
 }
