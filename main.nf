@@ -259,7 +259,6 @@ process AUGUSTUS {
     val id, emit: sample_id
     path "${id}_augustus_predictions.gff", emit: genes_gff
     path assembly, emit: scaffold
-    path "${id}_augustus_predictions.aa", emit: proteins_aa
     path "${id}_augustus_predictions.faa", emit: proteins_faa
 
     script:
@@ -275,7 +274,7 @@ process AUGUSTUS {
         --outfile=${id}_augustus_predictions.gff \
         $assembly
 
-    perl getAnnoFasta.pl ${id}_augustus_predictions.gff
+    getAnnoFasta.pl ${id}_augustus_predictions.gff
     mv ${id}_augustus_predictions.aa ${id}_augustus_predictions.faa
 
     conda deactivate
@@ -347,21 +346,25 @@ process dbCAN {
 
     input:
     val id
-    path gff
+    path proteins
 
     output:
     val id, emit: sample_id
-    path "clustered_genes.tsv", emit: clustered_genes
+    path "out", emit: cazymes
 
     script:
     """
     source $params.conda_shell
-    conda activate dbscan
-    python $params.dbscan \
-        --input ${gff} \
-        --output clustered_genes.tsv \
-        --eps 1000 \
-        --min_samples 3
+    conda activate dbcan
+
+    run_dbcan CAZyme_annotation \
+        --mode protein \
+        --input_raw_data ${proteins} \
+        --output_dir out \
+        --db_dir $params.dbcan_db_dir \
+        --methods diamond,hmm,dbCANsub \
+        --threads 4
+
     conda deactivate
     """
 }
@@ -489,6 +492,7 @@ process WoLFPSort {
 }
 
 workflow {
+    if (params.skip_deeptmhmm) { println "INFO: Skipping DeepTMHMM\n" }
     Channel.fromPath(params.samplesheet_path)
         .splitCsv(header: true)
         .map {row -> tuple(row.sample_id, file(row.read1), file(row.read2))}
@@ -508,9 +512,9 @@ workflow {
     QUAST(appendContigs.out.sample_id, appendContigs.out.final_scaffolds)
     Liftoff(appendContigs.out.sample_id, appendContigs.out.final_scaffolds, reference_fna, annotation)
     AUGUSTUS(appendContigs.out.sample_id, appendContigs.out.final_scaffolds)
-    // dbCAN(Liftoff.out.sample_id, Liftoff.out.genes_gff)
-    // BLASTp(dbCAN.out.sample_id, dbCAN.out.clustered_genes)
-    // antiSMASH(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
+    dbCAN(AUGUSTUS.out.sample_id, AUGUSTUS.out.proteins_faa)
+    BLASTp(AUGUSTUS.out.sample_id, AUGUSTUS.out.proteins_faa)
+    antiSMASH(AUGUSTUS.out.sample_id, AUGUSTUS.out.scaffold, AUGUSTUS.out.genes_gff)
 
     // nucmerMummer(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold, reference_fna)
     // repeatModeler(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold)
@@ -520,8 +524,8 @@ workflow {
     // McClintock(repeatMasker.out.sample_id, repeatMasker.out.masked_fasta, repeatModeler.out.repeat_lib, read1, read2, repeatMasker.out.masked_gff)
 
     // extractProteins(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
-    if (params.skip_deeptmhmm) { println "Skipping DeepTMHMM" }
-    else { DeepTMHMM(extractProteins.out.sample_id, extractProteins.out.proteins) }
+    
+    if(!params.skip_deeptmhmm) { DeepTMHMM(extractProteins.out.sample_id, extractProteins.out.proteins) }
     // TargetP(extractProteins.out.sample_id, extractProteins.out.proteins)
     // Signalp(extractProteins.out.sample_id, extractProteins.out.proteins)
     // WoLFPSort(extractProteins.out.sample_id, extractProteins.out.proteins)
