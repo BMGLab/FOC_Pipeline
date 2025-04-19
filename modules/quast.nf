@@ -1,7 +1,7 @@
 //  Quast module for assembly quality assessment
 process QUAST {
     tag "$id"
-    publishDir "${params.output_dir}/assembly_qc/${id}", mode: 'copy'
+    publishDir "${params.output_dir}/assembly_qc/quast/${id}", mode: 'copy'
 
     input:
     val id
