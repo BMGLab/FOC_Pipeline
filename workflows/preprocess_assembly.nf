@@ -2,6 +2,7 @@ include { fastp } from '../modules/fastp.nf'
 include { FastQC } from '../modules/fastqc.nf'
 include { QUAST } from '../modules/quast.nf'
 include { samTools } from '../modules/samtools.nf'
+include { LAST } from '../modules/last.nf'
 
 process megahitAssembly {
     tag "$id"
@@ -146,6 +147,7 @@ workflow preprocess_assembly {
     megahit_out = megahitAssembly(fastp.out.trimmed_reads)
     QUAST(megahit_out.sample_id, megahit_out.contigs)
     ragtag_out = ragtagCorrect(megahit_out.sample_id, megahit_out.contigs, reference) | ragtagScaffold
+    LAST(ragtag_out.sample_id, ragtag_out.scaffold_fasta, reference)
     extractChr0Contigs(ragtag_out.sample_id, ragtag_out.scaffold_agp, ragtag_out.corrected_contigs)
     minimap2(ragtag_out.sample_id, ragtag_out.scaffold_fasta, reference)
     samTools(minimap2.out)
