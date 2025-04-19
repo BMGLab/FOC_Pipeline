@@ -266,8 +266,6 @@ process AUGUSTUS {
     source $params.conda_shell
     conda activate augustus
 
-    # export AUGUSTUS_CONFIG_PATH="${params.augustus_config_path}"
-
     augustus \
         --species=fol \
         --gff3=on \
@@ -516,17 +514,17 @@ workflow {
     BLASTp(AUGUSTUS.out.sample_id, AUGUSTUS.out.proteins_faa)
     antiSMASH(AUGUSTUS.out.sample_id, AUGUSTUS.out.scaffold, AUGUSTUS.out.genes_gff)
 
-    // nucmerMummer(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold, reference_fna)
-    // repeatModeler(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold)
-    // repeatMasker(repeatModeler.out.sample_id, preprocess_assembly.out.scaffold, repeatModeler.out.repeat_lib)
-    // read1 = samples.map { it[1] }
-    // read2 = samples.map { it[2] }
-    // McClintock(repeatMasker.out.sample_id, repeatMasker.out.masked_fasta, repeatModeler.out.repeat_lib, read1, read2, repeatMasker.out.masked_gff)
+    nucmerMummer(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold, reference_fna)
+    repeatModeler(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold)
+    repeatMasker(repeatModeler.out.sample_id, preprocess_assembly.out.scaffold, repeatModeler.out.repeat_lib)
+    read1 = samples.map { it[1] }
+    read2 = samples.map { it[2] }
+    McClintock(repeatMasker.out.sample_id, repeatMasker.out.masked_fasta, repeatModeler.out.repeat_lib, read1, read2, repeatMasker.out.masked_gff)
 
-    // extractProteins(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
+    extractProteins(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
     
     if(!params.skip_deeptmhmm) { DeepTMHMM(extractProteins.out.sample_id, extractProteins.out.proteins) }
-    // TargetP(extractProteins.out.sample_id, extractProteins.out.proteins)
-    // Signalp(extractProteins.out.sample_id, extractProteins.out.proteins)
-    // WoLFPSort(extractProteins.out.sample_id, extractProteins.out.proteins)
+    TargetP(extractProteins.out.sample_id, extractProteins.out.proteins)
+    Signalp(extractProteins.out.sample_id, extractProteins.out.proteins)
+    WoLFPSort(extractProteins.out.sample_id, extractProteins.out.proteins)
 }
