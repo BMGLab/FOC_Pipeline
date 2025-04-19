@@ -3,7 +3,7 @@ include { samTools } from '../modules/samtools.nf'
 
 process Bowtie2 {
     tag "$id"
-    publishDir "${params.output_dir}/alignment/${id}", mode: 'copy'
+    publishDir "${params.output_dir}/alignment/bowtie2/${id}", mode: 'copy'
 
     input:
     tuple val(id), path(read1), path(read2)
@@ -71,19 +71,26 @@ process SnpEff {
     source $params.conda_shell
     export JAVA_HOME=${params.home}/miniconda3/envs/snpeff
     export JAVA_LD_LIBRARY_PATH=\${JAVA_LD_LIBRARY_PATH:-}
-    conda activate snpeff
-    export SNPEFF_JAR=${params.home}/miniconda3/envs/snpeff/share/snpeff-5.2-1/snpEff.jar
-    java -jar \$SNPEFF_JAR databases | grep ${params.snpeff_db}
 
+    conda activate bcftools
+    bcftools annotate \
+        --rename-chrs ${params.chr_rename_map} \
+        --output ${id}_renamed.vcf \
+        ${vcf}
+    conda deactivate
+
+    conda activate snpeff
+    export SNPEFF_JAR=${params.snpeff_jar}
+    java -jar \$SNPEFF_JAR databases | grep ${params.snpeff_db}
     java -Xmx8g -jar \$SNPEFF_JAR \
         -v ${params.snpeff_db} \
         -stats ${id}_snpEff_summary.html \
         -csvStats snpEff_summary.csv \
-        ${vcf} > ${id}_annotated.vcf
+        ${id}_renamed.vcf > ${id}_annotated.vcf
+    conda deactivate
 
     grep -v "^#" ${id}_annotated.vcf | cut -f 8 | grep -o 'ANN=.*' | \
     sed 's/ANN=//g' | tr ',' '\\n' | cut -f 4 -d '|' | sort | uniq -c > snpEff_genes.txt
-    conda deactivate
     """
 }
 
