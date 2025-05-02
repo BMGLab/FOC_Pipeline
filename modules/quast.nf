@@ -1,14 +1,19 @@
 //  Quast module for assembly quality assessment
 process QUAST {
     tag "$id"
-    publishDir "${params.output_dir}/assembly_qc/quast/${id}", mode: 'copy'
+    publishDir "${params.output_dir}/assembly_qc/quast/${dir}/${id}", mode: 'copy'
 
     input:
-    val id
-    path contigs
+    val(id)
+    path(contigs)
+    val(dir)
 
     output:
-    path "quast_output", emit: results
+    path "basic_stats", emit: basic_stats
+    path "icarus_viewers", emit: icarus_viewers
+    path "icarus.html", emit: icarus
+    path "report.*", emit: report
+    path "transposed_report.*", emit: transposed_report
 
     script:
     """
@@ -17,8 +22,7 @@ process QUAST {
     export JAVA_LD_LIBRARY_PATH=\${JAVA_LD_LIBRARY_PATH:-}
     conda activate quast
     quast.py ${contigs} \
-             -o quast_output \
-             --fast
+        -o .
     conda deactivate
     """
 }

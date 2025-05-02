@@ -1,10 +1,10 @@
 // 
 process fastp {
     tag "$sample_id"
-    publishDir "${params.output_dir}/trimmed", mode: 'copy'
+    publishDir "${params.output_dir}/fastp/${dir}/${sample_id}", mode: 'copy'
 
     input:
-    tuple val(sample_id), path(read1), path(read2)
+    tuple val(sample_id), path(read1), path(read2), val(dir)
 
     output:
     tuple val(sample_id), path("${sample_id}_trimmed_R1.fastq.gz"), path("${sample_id}_trimmed_R2.fastq.gz"), emit: trimmed_reads

@@ -1,10 +1,10 @@
-//
+// This Nextflow module is designed to process BAM files using Samtools.
 process samTools {
     tag "$id"
-    publishDir "${params.output_dir}/samtools/${id}", mode: 'copy'
+    publishDir "${params.output_dir}/samtools//${dir}/${id}", mode: 'copy'
 
     input:
-    tuple val(id), path(sam)
+    tuple val(id), path(sam), val(dir)
 
     output:
     tuple val(id), path("${id}_sorted.bam"), path("${id}_sorted.bam.bai"), emit: bam_bai

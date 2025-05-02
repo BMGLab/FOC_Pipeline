@@ -1,10 +1,10 @@
 // Nextflow script for running FastQC on paired-end sequencing data
 process FastQC {
     tag "$sample_id"
-    publishDir "${params.output_dir}/fastqc", mode: 'copy'
+    publishDir "${params.output_dir}/fastqc/${dir}/${sample_id}", mode: 'copy'
 
     input:
-    tuple val(sample_id), path(read1), path(read2)
+    tuple val(sample_id), path(read1), path(read2), val(dir)
 
     output:
     path "${read1_sample_id}_fastqc.html", emit: html_r1
