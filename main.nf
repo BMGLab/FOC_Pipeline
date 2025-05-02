@@ -174,6 +174,7 @@ process repeatMasker {
     """
 }
 
+// Need to bypass "Is out folder empty?" check in mcclintock.py
 process McClintock {
     tag "$id"
     publishDir "${params.output_dir}/mcclintock/${id}", mode: 'copy'
@@ -190,6 +191,8 @@ process McClintock {
     path "out/*", emit: results
 
     script:
+    def read1_name_fq = read1.getBaseName()
+    def read1_name = read1_name_fq.substring(0, read1_name_fq.lastIndexOf('.'))
     """
     source $params.conda_shell
     conda activate mcclintock
@@ -209,14 +212,16 @@ process McClintock {
     cleaned_consensus = clean_fasta_headers("${consensus}")
     EOF
 
+    mkdir -p out/${read1_name}/results/relocate2/unfiltered/repeat/results
     python $params.mcclintock \
         --reference ${reference} \
         --consensus ${consensus}_cleaned \
         --first ${read1} \
         --second ${read2} \
-        --proc 12
+        --proc 28 \
         --out out \
-        --methods ngs_te_mapper2,relocate2,tebreak
+        --methods ngs_te_mapper2,relocate2,tebreak \
+        --keep_intermediate all
     conda deactivate
     """
 }
@@ -499,15 +504,16 @@ workflow {
     reference = file(params.reference_genome)
     reference_fna = file("ref/GCF_000149955.1_ASM14995v2_genomic.fna")
     annotation = file("ref/GCF_000149955.1_ASM14995v2_genomic.gff")
+
     inspectReads(samples, reference)
-    FastQC(samples)
+    FastQC(samples.merge(Channel.value(".")))
 
     preprocess_assembly(samples, reference)
     alignment_variant_calling(samples, reference)
 
     BLASTn(preprocess_assembly.out.sample_id, preprocess_assembly.out.chr0_contigs)
     appendContigs(BLASTn.out.sample_id, BLASTn.out.blast_results, preprocess_assembly.out.chr0_contigs, preprocess_assembly.out.scaffold)
-    QUAST(appendContigs.out.sample_id, appendContigs.out.final_scaffolds)
+    QUAST(appendContigs.out.sample_id, appendContigs.out.final_scaffolds, Channel.value("."))
     Liftoff(appendContigs.out.sample_id, appendContigs.out.final_scaffolds, reference_fna, annotation)
     AUGUSTUS(appendContigs.out.sample_id, appendContigs.out.final_scaffolds)
     dbCAN(AUGUSTUS.out.sample_id, AUGUSTUS.out.proteins_faa)

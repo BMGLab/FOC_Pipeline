@@ -1,3 +1,6 @@
 sample_id,read1,read2
+1,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/1/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050174-16_1.fq.gz,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/1/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050174-16_2.fq.gz
 2,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/2/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050175-17_1.fq.gz,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/2/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050175-17_2.fq.gz
-10,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/10/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050183-37_1.fq.gz,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/10/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050183-37_2.fq.gz
+3,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/3/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050176-18_1.fq.gz,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/3/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050176-18_2.fq.gz
+4,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/4/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050177-21_1.fq.gz,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/4/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050177-21_2.fq.gz
+5,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/5/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050178-23_1.fq.gz,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/5/clean_data/170516_I137_FCHGW25BBXX_L6_wHAXPI050178-23_2.fq.gz
