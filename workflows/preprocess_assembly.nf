@@ -12,16 +12,15 @@ process megahitAssembly {
     tuple val(id), val(read1), val(read2)
 
     output:
-    path "megahit_output/final.contigs.fa", emit: contigs
-    path "megahit_output", emit: assembly_dir
     val id, emit: sample_id
+    path "megahit/final.contigs.fa", emit: contigs
 
     script:
     """
     source ${params.conda_shell}
     conda activate megahit
     megahit -1 '${read1}' -2 '${read2}' \
-            -o 'megahit_output' \
+            -o 'megahit' \
             --presets meta-sensitive
     conda deactivate
     """
@@ -142,15 +141,18 @@ workflow preprocess_assembly {
     reference
 
     main:
-    fastp(samples)
-    FastQC(samples)
+    def output_dir = Channel.value("${params.pa_wf_output}")
+    samples.merge(output_dir).set{ samples_ch }
+    fastp(samples_ch)
+    FastQC(samples_ch)
     megahit_out = megahitAssembly(fastp.out.trimmed_reads)
-    QUAST(megahit_out.sample_id, megahit_out.contigs)
+    QUAST(megahit_out.sample_id, megahit_out.contigs, output_dir)
     ragtag_out = ragtagCorrect(megahit_out.sample_id, megahit_out.contigs, reference) | ragtagScaffold
     LAST(ragtag_out.sample_id, ragtag_out.scaffold_fasta, reference)
     extractChr0Contigs(ragtag_out.sample_id, ragtag_out.scaffold_agp, ragtag_out.corrected_contigs)
     minimap2(ragtag_out.sample_id, ragtag_out.scaffold_fasta, reference)
-    samTools(minimap2.out)
+    minimap2.out.merge(output_dir).set { minimap2_out_ch }
+    samTools(minimap2_out_ch)
 
     emit:
     sample_id = ragtag_out.sample_id

@@ -20,7 +20,8 @@ process Bowtie2 {
     bowtie2 -x ${id}_bowtie2_index \
             -1 ${read1} -2 ${read2} \
             -S ${id}_aligned.sam \
-            2> ${id}_bowtie2.log
+            2> ${id}_bowtie2.log \
+            --threads 28
     conda deactivate
     """
 }
@@ -56,7 +57,7 @@ process BCFtools {
 process SnpEff {
     tag "$id"
     publishDir "${params.output_dir}/snpeff/${id}", mode: 'copy'
-    
+
     input:
     tuple val(id), path(vcf)
 
@@ -101,9 +102,12 @@ workflow alignment_variant_calling {
 
     main:
     ref = file('ref/GCF_000149955.1_ASM14995v2_genomic.fna')
-    fastp(samples)
+    def output_dir = Channel.value("${params.avc_wf_output}")
+    samples.merge(output_dir).set { samples_ch }
+    fastp(samples_ch)
     Bowtie2(fastp.out.trimmed_reads, ref_gz)
-    samTools(Bowtie2.out.sam)
+    Bowtie2.out.sam.merge(output_dir).set { bowtie2_ch }
+    samTools(bowtie2_ch)
     BCFtools(samTools.out.bam_bai, ref)
     SnpEff(BCFtools.out.vcf)
 }
