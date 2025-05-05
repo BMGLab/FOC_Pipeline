@@ -468,10 +468,11 @@ process Signalp {
     conda activate signalp6
     signalp6 \
         --fastafile $protein_fasta \
-        --organism euk \
         --output_dir output \
         --format all \
+        --organism euk \
         --mode slow \
+        --torch_num_threads 28 \
         --model_dir ${params.home}/signalp6_slow_sequential/signalp-6-package/models/
     conda deactivate
     """
