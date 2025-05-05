@@ -20,8 +20,9 @@ process megahitAssembly {
     source ${params.conda_shell}
     conda activate megahit
     megahit -1 '${read1}' -2 '${read2}' \
-            -o 'megahit' \
-            --presets meta-sensitive
+            --out-dir 'megahit' \
+            --presets meta-sensitive \
+            --num-cpu-threads 84
     conda deactivate
     """
 }
