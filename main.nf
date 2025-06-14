@@ -460,7 +460,8 @@ process Signalp {
     path protein_fasta
 
     output:
-    path("output/*"), emit: signalp_out
+    path("output/*"), emit: signalp_output
+    path("output/prediction_results.txt"), emit: prediction_results
 
     script:
     """
@@ -472,7 +473,6 @@ process Signalp {
         --format all \
         --organism euk \
         --mode slow \
-        --torch_num_threads 28 \
         --model_dir ${params.home}/signalp6_slow_sequential/signalp-6-package/models/
     conda deactivate
     """
