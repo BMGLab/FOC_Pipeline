@@ -19,4 +19,4 @@ docs/
 .venv/
 __pycache__/
 .DS_Store
-
+.nextflow
