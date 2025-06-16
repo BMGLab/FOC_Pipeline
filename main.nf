@@ -3,6 +3,7 @@ include { FastQC } from './modules/fastqc.nf'
 include { preprocess_assembly } from './workflows/preprocess_assembly.nf'
 include { alignment_variant_calling } from './workflows/alignment_variant_calling.nf'
 include { QUAST } from './modules/quast.nf'
+include { extractProteins } from './modules/extract_proteins.nf'
 
 nextflow.enable.dsl=2
 
@@ -26,7 +27,7 @@ process inspectReads {
 
 process BLASTn {
     tag "$id"
-    publishDir "${params.output_dir}/blast/${id}", mode: 'copy'
+    publishDir "${params.output_dir}/blastn/${id}", mode: 'copy'
 
     input:
     val(id)
@@ -174,6 +175,7 @@ process repeatMasker {
     """
 }
 
+// Need to bypass "Is out folder empty?" check in mcclintock.py
 process McClintock {
     tag "$id"
     publishDir "${params.output_dir}/mcclintock/${id}", mode: 'copy'
@@ -190,6 +192,8 @@ process McClintock {
     path "out/*", emit: results
 
     script:
+    def read1_name_fq = read1.getBaseName()
+    def read1_name = read1_name_fq.substring(0, read1_name_fq.lastIndexOf('.'))
     """
     source $params.conda_shell
     conda activate mcclintock
@@ -209,14 +213,16 @@ process McClintock {
     cleaned_consensus = clean_fasta_headers("${consensus}")
     EOF
 
+    mkdir -p out/${read1_name}/results/relocate2/unfiltered/repeat/results
     python $params.mcclintock \
         --reference ${reference} \
         --consensus ${consensus}_cleaned \
         --first ${read1} \
         --second ${read2} \
-        --proc 12
+        --proc 28 \
         --out out \
-        --methods ngs_te_mapper2,relocate2,tebreak
+        --methods ngs_te_mapper2,relocate2,tebreak \
+        --keep_intermediate all
     conda deactivate
     """
 }
@@ -243,6 +249,38 @@ process Liftoff {
     liftoff -g $annotation -o ${id}_predicted_genes.gff \
             -p 28 \
             $assembly $reference
+    conda deactivate
+    """
+}
+
+process AUGUSTUS {
+    tag "$id"
+    publishDir "${params.output_dir}/augustus/${id}", mode: 'copy'
+
+    input:
+    val id
+    path assembly
+
+    output:
+    val id, emit: sample_id
+    path "${id}_augustus_predictions.gff", emit: genes_gff
+    path assembly, emit: scaffold
+    path "${id}_augustus_predictions.faa", emit: proteins_faa
+
+    script:
+    """
+    source $params.conda_shell
+    conda activate augustus
+
+    augustus \
+        --species=fol \
+        --gff3=on \
+        --outfile=${id}_augustus_predictions.gff \
+        $assembly
+
+    getAnnoFasta.pl ${id}_augustus_predictions.gff
+    mv ${id}_augustus_predictions.aa ${id}_augustus_predictions.faa
+
     conda deactivate
     """
 }
@@ -306,60 +344,36 @@ process BLASTp {
     """
 }
 
-process DBSCAN {
+process dbCAN {
     tag "$id"
-    publishDir "${params.output_dir}/dbscan/${id}", mode: 'copy'
+    publishDir "${params.output_dir}/dbcan/${id}", mode: 'copy'
 
     input:
     val id
-    path gff
+    path proteins
 
     output:
     val id, emit: sample_id
-    path "clustered_genes.tsv", emit: clustered_genes
+    path "out", emit: cazymes
 
     script:
     """
     source $params.conda_shell
-    conda activate dbscan
-    python $params.dbscan \
-        --input ${gff} \
-        --output clustered_genes.tsv \
-        --eps 1000 \
-        --min_samples 3
+    conda activate dbcan
+
+    run_dbcan CAZyme_annotation \
+        --mode protein \
+        --input_raw_data ${proteins} \
+        --output_dir out \
+        --db_dir $params.dbcan_db_dir \
+        --methods diamond,hmm,dbCANsub \
+        --threads 4
+
     conda deactivate
     """
 }
 
-process extractProteins {
-    tag "$id"
 
-    input:
-    val id
-    path assembly
-    path gff
-
-    output:
-    val id, emit: sample_id
-    path "${id}_predicted_proteins.faa", emit: proteins
-
-    script:
-    """
-    source $params.conda_shell
-    conda activate agat
-    agat_sp_fix_cds_phases.pl \
-        --gff $gff \
-        --fasta ${assembly} \
-        -o ${id}_predicted_genes_fixed.gff
-    agat_sp_extract_sequences.pl \
-        --gff ${id}_predicted_genes_fixed.gff \
-        --fasta ${assembly} \
-        --type CDS \
-        --protein \
-        -o ${id}_predicted_proteins.faa
-    conda deactivate
-    """
-}
 
 process DeepTMHMM {
     tag "$id"
@@ -376,7 +390,9 @@ process DeepTMHMM {
     """
     source $params.conda_shell
     conda activate deeptmhmm
+
     biolib run --local 'DTU/DeepTMHMM:1.0.24' --fasta ${protein_fasta} > ${id}_tmhmm.out
+
     conda deactivate
     """
 }
@@ -414,7 +430,8 @@ process Signalp {
     path protein_fasta
 
     output:
-    path("output/*"), emit: signalp_out
+    path("output/*"), emit: signalp_output
+    path("output/prediction_results.txt"), emit: prediction_results
 
     script:
     """
@@ -422,9 +439,9 @@ process Signalp {
     conda activate signalp6
     signalp6 \
         --fastafile $protein_fasta \
-        --organism euk \
         --output_dir output \
         --format all \
+        --organism euk \
         --mode slow \
         --model_dir ${params.home}/signalp6_slow_sequential/signalp-6-package/models/
     conda deactivate
@@ -449,6 +466,7 @@ process WoLFPSort {
 }
 
 workflow {
+    if (params.skip_deeptmhmm) { println "INFO: Skipping DeepTMHMM\n" }
     Channel.fromPath(params.samplesheet_path)
         .splitCsv(header: true)
         .map {row -> tuple(row.sample_id, file(row.read1), file(row.read2))}
@@ -457,19 +475,21 @@ workflow {
     reference = file(params.reference_genome)
     reference_fna = file("ref/GCF_000149955.1_ASM14995v2_genomic.fna")
     annotation = file("ref/GCF_000149955.1_ASM14995v2_genomic.gff")
+
     inspectReads(samples, reference)
-    FastQC(samples)
+    FastQC(samples.merge(Channel.value(".")))
 
     preprocess_assembly(samples, reference)
     alignment_variant_calling(samples, reference)
 
     BLASTn(preprocess_assembly.out.sample_id, preprocess_assembly.out.chr0_contigs)
     appendContigs(BLASTn.out.sample_id, BLASTn.out.blast_results, preprocess_assembly.out.chr0_contigs, preprocess_assembly.out.scaffold)
-    QUAST(appendContigs.out.sample_id, appendContigs.out.final_scaffolds)
+    QUAST(appendContigs.out.sample_id, appendContigs.out.final_scaffolds, Channel.value("."))
     Liftoff(appendContigs.out.sample_id, appendContigs.out.final_scaffolds, reference_fna, annotation)
-    DBSCAN(Liftoff.out.sample_id, Liftoff.out.genes_gff)
-    BLASTp(DBSCAN.out.sample_id, DBSCAN.out.clustered_genes)
-    antiSMASH(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
+    AUGUSTUS(appendContigs.out.sample_id, appendContigs.out.final_scaffolds)
+    dbCAN(AUGUSTUS.out.sample_id, AUGUSTUS.out.proteins_faa)
+    BLASTp(AUGUSTUS.out.sample_id, AUGUSTUS.out.proteins_faa)
+    antiSMASH(AUGUSTUS.out.sample_id, AUGUSTUS.out.scaffold, AUGUSTUS.out.genes_gff)
 
     nucmerMummer(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold, reference_fna)
     repeatModeler(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold)
@@ -479,8 +499,8 @@ workflow {
     McClintock(repeatMasker.out.sample_id, repeatMasker.out.masked_fasta, repeatModeler.out.repeat_lib, read1, read2, repeatMasker.out.masked_gff)
 
     extractProteins(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
-    if (params.skip_deeptmhmm) { println "Skipping DeepTMHMM" }
-    else { DeepTMHMM(extractProteins.out.sample_id, extractProteins.out.proteins) }
+    
+    if(!params.skip_deeptmhmm) { DeepTMHMM(extractProteins.out.sample_id, extractProteins.out.proteins) }
     TargetP(extractProteins.out.sample_id, extractProteins.out.proteins)
     Signalp(extractProteins.out.sample_id, extractProteins.out.proteins)
     WoLFPSort(extractProteins.out.sample_id, extractProteins.out.proteins)
