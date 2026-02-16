@@ -102,7 +102,7 @@ workflow alignment_variant_calling {
 
     main:
     ref = file('ref/GCF_000149955.1_ASM14995v2_genomic.fna')
-    def output_dir = Channel.value("${params.avc_wf_output}")
+    def output_dir = channel.value("${params.avc_wf_output}")
     samples.merge(output_dir).set { samples_ch }
     fastp(samples_ch)
     Bowtie2(fastp.out.trimmed_reads, ref_gz)

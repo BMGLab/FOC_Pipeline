@@ -1,0 +1,6 @@
+sample_id,read1,read2
+41,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/41/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050214-94_1.fq.gz,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/41/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050214-94_2.fq.gz
+42,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/42/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050215-95_1.fq.gz,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/42/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050215-95_2.fq.gz
+43,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/43/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050216-96_1.fq.gz,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/43/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050216-96_2.fq.gz
+44,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/44/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050217-100_1.fq.gz,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/44/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050217-100_2.fq.gz
+45,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/45/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050218-103_1.fq.gz,/home/sercanozturk/Fol_Nextflow_Pipeline/sample_reads/45/clean_data/170516_I137_FCHGW25BBXX_L7_wHAXPI050218-103_2.fq.gz

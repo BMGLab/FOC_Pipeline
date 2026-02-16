@@ -3,7 +3,6 @@ include { FastQC } from './modules/fastqc.nf'
 include { preprocess_assembly } from './workflows/preprocess_assembly.nf'
 include { alignment_variant_calling } from './workflows/alignment_variant_calling.nf'
 include { QUAST } from './modules/quast.nf'
-include { extractProteins } from './modules/extract_proteins.nf'
 
 nextflow.enable.dsl=2
 
@@ -373,7 +372,38 @@ process dbCAN {
     """
 }
 
+process extractProteins {
+    tag "$id"
 
+    input:
+    val id
+    path assembly
+    path gff
+
+    output:
+    val id, emit: sample_id
+    path "${id}_predicted_proteins.faa", emit: proteins
+
+    script:
+    """
+    source $params.conda_shell
+    conda activate agat
+
+    agat_sp_fix_cds_phases.pl \
+        --gff $gff \
+        --fasta ${assembly} \
+        -o ${id}_predicted_genes_fixed.gff
+
+    agat_sp_extract_sequences.pl \
+        --gff ${id}_predicted_genes_fixed.gff \
+        --fasta ${assembly} \
+        --type CDS \
+        --protein \
+        -o ${id}_predicted_proteins.faa
+
+    conda deactivate
+    """
+}
 
 process DeepTMHMM {
     tag "$id"
@@ -467,7 +497,7 @@ process WoLFPSort {
 
 workflow {
     if (params.skip_deeptmhmm) { println "INFO: Skipping DeepTMHMM\n" }
-    Channel.fromPath(params.samplesheet_path)
+    channel.fromPath(params.samplesheet_path)
         .splitCsv(header: true)
         .map {row -> tuple(row.sample_id, file(row.read1), file(row.read2))}
         .set { samples }
@@ -477,14 +507,14 @@ workflow {
     annotation = file("ref/GCF_000149955.1_ASM14995v2_genomic.gff")
 
     inspectReads(samples, reference)
-    FastQC(samples.merge(Channel.value(".")))
+    FastQC(samples.merge(channel.value(".")))
 
     preprocess_assembly(samples, reference)
     alignment_variant_calling(samples, reference)
 
     BLASTn(preprocess_assembly.out.sample_id, preprocess_assembly.out.chr0_contigs)
     appendContigs(BLASTn.out.sample_id, BLASTn.out.blast_results, preprocess_assembly.out.chr0_contigs, preprocess_assembly.out.scaffold)
-    QUAST(appendContigs.out.sample_id, appendContigs.out.final_scaffolds, Channel.value("."))
+    QUAST(appendContigs.out.sample_id, appendContigs.out.final_scaffolds, channel.value("."))
     Liftoff(appendContigs.out.sample_id, appendContigs.out.final_scaffolds, reference_fna, annotation)
     AUGUSTUS(appendContigs.out.sample_id, appendContigs.out.final_scaffolds)
     dbCAN(AUGUSTUS.out.sample_id, AUGUSTUS.out.proteins_faa)
