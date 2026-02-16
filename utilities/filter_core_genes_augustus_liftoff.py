@@ -72,13 +72,71 @@ def filter_faa(input_path, output_path, gene_set):
             if keep:
                 fout.write(line)
 
-def filter_gff(input_path, output_path, gene_set):
+# def filter_gff(input_path, output_path, gene_set):
+#     with open(input_path) as fin, open(output_path, 'w') as fout:
+#         for line in fin:
+#             if line.startswith("#") or '\tgene\t' not in line:
+#                 continue
+#             match = re.search(r'ID=([^;]+)', line)
+#             if match and match.group(1).rstrip() in gene_set:
+#                 fout.write(line)
+
+def filter_gff(input_path, output_path, core_gene_ids):
+    # Store mRNA/transcript IDs that belong to core genes
+    parent_to_gene = defaultdict(str)
+    allowed_ids = set(core_gene_ids)  # genes + their children
+
+    with open(input_path) as fin:
+        # First pass: collect all IDs related to core genes
+        for line in fin:
+            if line.startswith('#'):
+                continue
+
+            fields = line.strip().split('\t')
+            if len(fields) < 9:
+                continue
+
+            attr = fields[8]
+            feature_type = fields[2]
+
+            gene_id_match = re.search(r'ID=([^;]+)', attr)
+            parent_match = re.search(r'Parent=([^;]+)', attr)
+
+            if feature_type == 'gene' and gene_id_match:
+                gene_id = gene_id_match.group(1)
+                if gene_id in core_gene_ids:
+                    allowed_ids.add(gene_id)
+
+            elif parent_match:
+                parent_id = parent_match.group(1)
+                # Map this child (e.g., mRNA or CDS) back to a parent gene
+                if parent_id in core_gene_ids or parent_id in allowed_ids:
+                    if gene_id_match:
+                        child_id = gene_id_match.group(1)
+                        allowed_ids.add(child_id)
+                    allowed_ids.add(parent_id)
+
+    # Second pass: write only lines related to core genes
     with open(input_path) as fin, open(output_path, 'w') as fout:
         for line in fin:
-            if line.startswith("#") or '\tgene\t' not in line:
+            if line.startswith('#'):
                 continue
-            match = re.search(r'ID=([^;]+)', line)
-            if match and match.group(1).rstrip() in gene_set:
+
+            fields = line.strip().split('\t')
+            if len(fields) < 9:
+                continue
+
+            attr = fields[8]
+            id_match = re.search(r'ID=([^;]+)', attr)
+            parent_match = re.search(r'Parent=([^;]+)', attr)
+
+            match_id = None
+            if id_match:
+                match_id = id_match.group(1)
+            elif parent_match:
+                match_id = parent_match.group(1)
+
+            if match_id and match_id in allowed_ids:
                 fout.write(line)
 
 def run_filtering(root_dir, use_faa=True, output_dir="core_filtered"):

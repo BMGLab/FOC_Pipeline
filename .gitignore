@@ -2,6 +2,7 @@
 data/
 logs/
 tools/
+core_genes
 
 # Ignore documentation drafts
 docs/
