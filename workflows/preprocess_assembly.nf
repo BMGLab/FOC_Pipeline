@@ -142,7 +142,7 @@ workflow preprocess_assembly {
     reference
 
     main:
-    def output_dir = Channel.value("${params.pa_wf_output}")
+    def output_dir = channel.value("${params.pa_wf_output}")
     samples.merge(output_dir).set{ samples_ch }
     fastp(samples_ch)
     FastQC(samples_ch)
