@@ -1,43 +1,102 @@
-# --- Sample README.md for Bioinformatics Project ---
+# FoxGenome_wd
 
-"""
-# Project Title: [Descriptive title of your analysis/project]
+Nextflow DSL2 workflow for fungal genome assembly refinement, variant calling, repeat/transposon analysis, and functional annotation.
 
-## Overview
-This project investigates [brief description of the biological context and goals].
+## What this pipeline does
 
-## Project Structure
+Given paired-end reads and a reference genome, the pipeline runs:
+
+1. Read QC and trimming (`FastQC`, `fastp`)
+2. Assembly and scaffolding (`megahit`, `ragtag`)
+3. Contig handling around `Chr0_RagTag` and scaffold merging
+4. Alignment and variant calling (`bowtie2`, `samtools`, `bcftools`, `SnpEff`)
+5. Assembly comparison and quality checks (`nucmer`, `mummerplot`, `QUAST`, `LAST`)
+6. Repeat discovery/masking and TE analysis (`RepeatModeler`, `RepeatMasker`, `McClintock`)
+7. Gene prediction/transfer (`AUGUSTUS`, `Liftoff`)
+8. Functional analyses (`antiSMASH`, `BLASTp` vs MEROPS, `dbCAN`, `TargetP`, `SignalP`, `WoLFPSort`, optional `DeepTMHMM`)
+
+Main entrypoint: `main.nf`  
+Sub-workflows:
+- `workflows/preprocess_assembly.nf`
+- `workflows/alignment_variant_calling.nf`
+
+## Repository layout
+
+```text
+FoxGenome_wd/
+├── main.nf
+├── nextflow.config
+├── workflows/
+├── modules/
+├── utilities/
+├── ref/
+├── sample_reads/
+├── samplesheet.csv
+└── run.sh
 ```
-your_project/
-├── data/            # raw and processed data
-├── scripts/         # analysis scripts (numbered)
-├── figures/         # generated plots and visuals
-├── results/         # intermediate result files
-├── notebooks/       # exploratory Jupyter/RMarkdown notebooks
-├── docs/            # documentation and manuscript text
-├── README.md        # this file
-├── environment.yml  # reproducible environment
+
+## Requirements
+
+- Nextflow (tested with `NXF_VER=24.10.5` in `run.sh`)
+- Conda installation with tool-specific environments used by the workflow
+- Local databases and external resources referenced in `nextflow.config`
+
+Important: this project expects existing local paths for some resources (example: BLAST db, dbCAN db, McClintock, TargetP). Update these in `nextflow.config` for your system:
+
+- `params.blast_db_dir`
+- `params.dbcan_db_dir`
+- `params.mcclintock`
+- `params.targetp`
+- `params.merops_db_dir`
+- `params.conda_shell`
+
+## Input format
+
+Samplesheet CSV (header required):
+
+```csv
+sample_id,read1,read2
+sampleA,/abs/path/sampleA_R1.fastq.gz,/abs/path/sampleA_R2.fastq.gz
+sampleB,/abs/path/sampleB_R1.fastq.gz,/abs/path/sampleB_R2.fastq.gz
 ```
 
-## Setup Instructions
+Default samplesheet path is `samplesheet.csv` (override with `--samplesheet_path`).
+
+## Running
+
+Example run:
+
 ```bash
-conda env create -f environment.yml
-conda activate your_env_name
+export NXF_VER=24.10.5
+nextflow -log logs/.nextflow.log run main.nf \
+  --samplesheet_path samplesheet.csv \
+  --skip_deeptmhmm true
 ```
 
-## Pipeline Summary
-1. **01_preprocessing.R** – Load and QC the input data.
-2. **02_DE_analysis.py** – Differential expression analysis.
-3. **03_enrichment.R** – Functional enrichment (GO/KEGG).
-4. **04_plotting.R** – Generate figures for the manuscript.
+The provided `run.sh` contains a similar command and optional Slack webhook setup.
 
-## Figures
-All key plots are saved in `/figures`. The naming follows the manuscript figure order (e.g., `Figure1_PCA.png`, `Figure2_Volcano.pdf`).
+## Key parameters
 
-## Reproducibility
-- All scripts use fixed random seeds.
-- Software versions are logged via `sessionInfo()` or `pip freeze`.
+- `--output_dir` (default: `results`)
+- `--reference_genome` (default: `ref/GCF_000149955.1_ASM14995v2_genomic.fna.gz`)
+- `--samplesheet_path` (default: `samplesheet.csv`)
+- `--skip_deeptmhmm` (default: `false`)
 
-## Citation
-If you use this project, please cite: [Your paper or bioRxiv link]
-"""
+See `nextflow.config` for additional tool/database settings.
+
+## Outputs
+
+Results are published under `${output_dir}` (default `results`) by analysis type, including:
+
+- `fastp/`, `fastqc/`
+- `assembly/`, `ragtag/`, `chr0_contigs/`
+- `alignment/`, `samtools/`, `bcftools/`, `snpeff/`
+- `repeatmodeler/`, `repeatmasker/`, `mcclintock/`
+- `liftoff/`, `augustus/`, `antismash/`, `blastp/`, `dbcan/`
+- `targetp/`, `signalp/`, `wolfpsort/`, `deeptmhmm/` (if enabled)
+
+## Notes
+
+- `workflows/functional_annotation.nf` is present but not called by `main.nf`.
+- The pipeline uses multiple conda environments inside process scripts.
+- Slack notification is sent on completion if `SLACK_WEBHOOK` is set.
