@@ -5,6 +5,7 @@ tools/
 core_genes/
 ref/*
 samplesheets/*
+sample_reads/*
 
 # Ignore documentation drafts
 docs/
