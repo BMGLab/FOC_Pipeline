@@ -358,6 +358,186 @@ process GroupSpecificVariants {
     """
 }
 
+process AnnotateGroupSpecificVariants {
+    publishDir "${params.output_dir}/group_specific_variants/annotated", mode: 'copy'
+
+    input:
+    path group_vcf
+
+    output:
+    tuple val(group_name), path("${group_name}_strict_specific.annotated.vcf"), emit: annotated_vcf
+
+    script:
+    def base = group_vcf.getBaseName()
+    def group_name = base.replaceFirst(/_strict_specific$/, '')
+    """
+    source $params.conda_shell
+    export JAVA_HOME=${params.home}/miniconda3/envs/snpeff
+    export JAVA_LD_LIBRARY_PATH=\${JAVA_LD_LIBRARY_PATH:-}
+
+    conda activate bcftools
+    bcftools annotate \
+        --rename-chrs ${params.chr_rename_map} \
+        --output ${group_name}_strict_specific.renamed.vcf \
+        ${group_vcf}
+    conda deactivate
+
+    conda activate snpeff
+    export SNPEFF_JAR=${params.snpeff_jar}
+    java -Xmx8g -jar \$SNPEFF_JAR \
+        -v ${params.snpeff_db} \
+        ${group_name}_strict_specific.renamed.vcf > ${group_name}_strict_specific.annotated.vcf
+    conda deactivate
+    """
+}
+
+process ExtractGroupCandidateProteins {
+    publishDir "${params.output_dir}/group_specific_variants/candidate_proteins", mode: 'copy'
+
+    input:
+    tuple val(group_name), path(annotated_vcf)
+    path fol_proteins
+
+    output:
+    tuple val(group_name), path("${group_name}_candidate_proteins.faa"), emit: proteins
+    path "${group_name}_candidate_genes.txt", emit: genes
+
+    script:
+    """
+    python - <<'PY'
+    import gzip
+    import re
+    from pathlib import Path
+
+    group = "${group_name}"
+    vcf_path = Path("${annotated_vcf}")
+    proteins_path = Path("${fol_proteins}")
+
+    genes = set()
+    with vcf_path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            if line.startswith("#"):
+                continue
+            cols = line.rstrip("\\n").split("\\t")
+            if len(cols) < 8:
+                continue
+            info = cols[7]
+            ann_match = re.search(r"ANN=([^;]+)", info)
+            if not ann_match:
+                continue
+            for ann in ann_match.group(1).split(","):
+                fields = ann.split("|")
+                if len(fields) > 3 and fields[3]:
+                    genes.add(fields[3])
+                if len(fields) > 4 and fields[4]:
+                    genes.add(fields[4])
+
+    out_gene = Path(f"{group}_candidate_genes.txt")
+    with out_gene.open("w", encoding="utf-8") as out:
+        for g in sorted(genes):
+            out.write(f"{g}\\n")
+
+    open_fn = gzip.open if str(proteins_path).endswith(".gz") else open
+    selected = []
+    with open_fn(proteins_path, "rt", encoding="utf-8", errors="replace") as fh:
+        header = None
+        seq = []
+        for line in fh:
+            if line.startswith(">"):
+                if header is not None:
+                    selected.append((header, "".join(seq)))
+                header = line.rstrip("\\n")
+                seq = []
+            else:
+                seq.append(line.strip())
+        if header is not None:
+            selected.append((header, "".join(seq)))
+
+    def header_matches(h, gene_set):
+        token = h[1:].split()[0]
+        if token in gene_set:
+            return True
+        for g in gene_set:
+            if re.search(rf"(^|[|:_;\\s]){re.escape(g)}($|[|:_;\\s])", h):
+                return True
+        return False
+
+    out_faa = Path(f"{group}_candidate_proteins.faa")
+    with out_faa.open("w", encoding="utf-8") as out:
+        for h, s in selected:
+            if genes and header_matches(h, genes):
+                out.write(f"{h}\\n")
+                for i in range(0, len(s), 80):
+                    out.write(s[i:i+80] + "\\n")
+    PY
+    """
+}
+
+process PHIBaseBlastp {
+    publishDir "${params.output_dir}/group_specific_variants/phi_base", mode: 'copy'
+
+    input:
+    tuple val(group_name), path(candidate_proteins)
+
+    output:
+    tuple val(group_name), path("${group_name}_phi_base_blastp.tsv"), emit: phi_hits
+
+    script:
+    """
+    source $params.conda_shell
+    conda activate blast
+
+    if [[ ! -s "${candidate_proteins}" ]]; then
+        : > ${group_name}_phi_base_blastp.tsv
+        conda deactivate
+        exit 0
+    fi
+
+    blastp \
+        -query ${candidate_proteins} \
+        -db ${params.phibase_db} \
+        -evalue ${params.phibase_blast_evalue} \
+        -num_threads ${params.phibase_threads} \
+        -max_target_seqs ${params.phibase_max_target_seqs} \
+        -outfmt "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qcovs" \
+        -out ${group_name}_phi_base_blastp.tsv
+
+    conda deactivate
+    """
+}
+
+process EggNOGFol4287 {
+    publishDir "${params.output_dir}/eggnog", mode: 'copy'
+
+    input:
+    path fol_proteins
+
+    output:
+    path "fol4287.emapper.annotations", emit: annotations
+
+    script:
+    """
+    source $params.conda_shell
+    conda activate eggnog
+
+    if [[ "${fol_proteins}" == *.gz ]]; then
+        gunzip -c ${fol_proteins} > fol4287_proteins.faa
+        PROT=fol4287_proteins.faa
+    else
+        PROT=${fol_proteins}
+    fi
+
+    emapper.py \
+        -i \$PROT \
+        --itype proteins \
+        --cpu ${params.eggnog_threads} \
+        --data_dir ${params.eggnog_data_dir} \
+        -o fol4287
+
+    conda deactivate
+    """
+}
+
 process SnpEff {
     tag "$id"
     publishDir "${params.output_dir}/snpeff/${id}", mode: 'copy'
@@ -407,6 +587,7 @@ workflow alignment_variant_calling {
     main:
     ref = file('ref/GCF_000149955.1_ASM14995v2_genomic.fna')
     group_map = file(params.avc_group_map)
+    fol_proteins = file(params.fol_proteins_fasta)
     def output_dir = channel.value("${params.avc_wf_output}")
     samples.merge(output_dir).set { samples_ch }
     fastp(samples_ch)
@@ -422,6 +603,15 @@ workflow alignment_variant_calling {
             throw new IllegalArgumentException("Group map not found at --avc_group_map: ${params.avc_group_map}")
         }
         GroupSpecificVariants(RestrictVariantsToCallable.out.vcf.map { id, vcf -> vcf }.collect(), group_map)
+        if (params.avc_run_group_functional_annotation) {
+            if (!fol_proteins.exists()) {
+                throw new IllegalArgumentException("Fol4287 proteins FASTA not found at --fol_proteins_fasta: ${params.fol_proteins_fasta}")
+            }
+            EggNOGFol4287(fol_proteins)
+            AnnotateGroupSpecificVariants(GroupSpecificVariants.out.group_vcfs)
+            ExtractGroupCandidateProteins(AnnotateGroupSpecificVariants.out.annotated_vcf, fol_proteins)
+            PHIBaseBlastp(ExtractGroupCandidateProteins.out.proteins)
+        }
     }
     SnpEff(RestrictVariantsToCallable.out.vcf)
 }
