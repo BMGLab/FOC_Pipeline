@@ -1,102 +1,107 @@
-# FoxGenome_wd
+# FoxGenome_wd (`dogay` branch)
 
-Nextflow DSL2 workflow for fungal genome assembly refinement, variant calling, repeat/transposon analysis, and functional annotation.
+This branch contains the manuscript-aligned implementation of the *Fusarium oxysporum* pipeline.
 
-## What this pipeline does
+## Scope of this branch
 
-Given paired-end reads and a reference genome, the pipeline runs:
+The `dogay` branch is configured to match the manuscript workflow as closely as possible, including:
 
-1. Read QC and trimming (`FastQC`, `fastp`)
-2. Assembly and scaffolding (`megahit`, `ragtag`)
-3. Contig handling around `Chr0_RagTag` and scaffold merging
-4. Alignment and variant calling (`bowtie2`, `samtools`, `bcftools`, `SnpEff`)
-5. Assembly comparison and quality checks (`nucmer`, `mummerplot`, `QUAST`, `LAST`)
-6. Repeat discovery/masking and TE analysis (`RepeatModeler`, `RepeatMasker`, `McClintock`)
-7. Gene prediction/transfer (`AUGUSTUS`, `Liftoff`)
-8. Functional analyses (`antiSMASH`, `BLASTp` vs MEROPS, `dbCAN`, `TargetP`, `SignalP`, `WoLFPSort`, optional `DeepTMHMM`)
+- Read mapping for coverage estimation with `bwa mem`, duplicate handling, and depth-based summary.
+- RagTag assembly/scaffolding as core assembly step.
+- Variant calling with `Bowtie2 + bcftools` using explicit ploidy and quality thresholds.
+- Callable genome workflow (`mosdepth` + `samtools depth`) with consensus callable genome (K-of-N, default 80%).
+- Strict group-specific variant extraction from callable-restricted variants.
+- Functional annotation of group-specific variants (SnpEff, EggNOG on Fol4287 proteins, PHI-base BLASTp).
+- SIX effector screening using dedicated BLASTp process and manuscript thresholds.
+- CAZyme identification in HMM-only mode with `domE <= 1e-15` and protein-level summaries.
 
-Main entrypoint: `main.nf`  
-Sub-workflows:
+Optional/non-manuscript analyses are retained but disabled by default where applicable.
+
+## Main entrypoints
+
+- `main.nf`
 - `workflows/preprocess_assembly.nf`
 - `workflows/alignment_variant_calling.nf`
 
-## Repository layout
+## Key manuscript-alignment defaults
 
-```text
-FoxGenome_wd/
-├── main.nf
-├── nextflow.config
-├── workflows/
-├── modules/
-├── utilities/
-├── ref/
-├── sample_reads/
-├── samplesheet.csv
-└── run.sh
-```
+From `nextflow.config` (can be overridden at runtime):
 
-## Requirements
+- `params.enable_chr0_blast_append = false`
+- `params.run_mcclintock = false`
+- `params.avc_min_mapq = 30`
+- `params.avc_min_baseq = 20`
+- `params.avc_min_callable_depth = 20`
+- `params.avc_consensus_callable_fraction = 0.80`
+- `params.avc_ploidy = 2`
+- `params.avc_run_group_specific = true`
+- `params.avc_run_group_functional_annotation = true`
+- `params.dbcan_hmm_dome = "1e-15"`
 
-- Nextflow (tested with `NXF_VER=24.10.5` in `run.sh`)
-- Conda installation with tool-specific environments used by the workflow
-- Local databases and external resources referenced in `nextflow.config`
+## Required inputs
 
-Important: this project expects existing local paths for some resources (example: BLAST db, dbCAN db, McClintock, TargetP). Update these in `nextflow.config` for your system:
+### 1) Samplesheet
 
-- `params.blast_db_dir`
-- `params.dbcan_db_dir`
-- `params.mcclintock`
-- `params.targetp`
-- `params.merops_db_dir`
-- `params.conda_shell`
-
-## Input format
-
-Samplesheet CSV (header required):
+CSV with header:
 
 ```csv
 sample_id,read1,read2
-sampleA,/abs/path/sampleA_R1.fastq.gz,/abs/path/sampleA_R2.fastq.gz
-sampleB,/abs/path/sampleB_R1.fastq.gz,/abs/path/sampleB_R2.fastq.gz
+34,/path/sample34_R1.fastq.gz,/path/sample34_R2.fastq.gz
+35,/path/sample35_R1.fastq.gz,/path/sample35_R2.fastq.gz
 ```
 
-Default samplesheet path is `samplesheet.csv` (override with `--samplesheet_path`).
+Default: `samplesheet.csv`
 
-## Running
+### 2) Group map for strict group-specific variants
 
-Example run:
+TSV with header or comment lines allowed:
+
+```tsv
+# sample_id	group
+34	GroupB
+35	GroupB
+41	GroupA
+42	GroupA
+```
+
+Default: `samplesheets/group_map.tsv`
+
+### 3) External databases/resources
+
+Set valid paths in `nextflow.config` or via CLI params:
+
+- BLAST nt/MEROPS and SIX query fasta
+- dbCAN database directory
+- PHI-base BLAST database (`params.phibase_db`)
+- EggNOG data directory (`params.eggnog_data_dir`)
+- SnpEff DB/JAR paths
+
+## Running (dogay branch)
+
+Use your validated environment:
 
 ```bash
-export NXF_VER=24.10.5
-nextflow -log logs/.nextflow.log run main.nf \
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate /home/sercanozturk/miniconda3/envs/nf-env
+nextflow run main.nf \
   --samplesheet_path samplesheet.csv \
-  --skip_deeptmhmm true
+  -with-report
 ```
 
-The provided `run.sh` contains a similar command and optional Slack webhook setup.
+## Outputs (high level)
 
-## Key parameters
+Under `results/` (default):
 
-- `--output_dir` (default: `results`)
-- `--reference_genome` (default: `ref/GCF_000149955.1_ASM14995v2_genomic.fna.gz`)
-- `--samplesheet_path` (default: `samplesheet.csv`)
-- `--skip_deeptmhmm` (default: `false`)
-
-See `nextflow.config` for additional tool/database settings.
-
-## Outputs
-
-Results are published under `${output_dir}` (default `results`) by analysis type, including:
-
-- `fastp/`, `fastqc/`
-- `assembly/`, `ragtag/`, `chr0_contigs/`
-- `alignment/`, `samtools/`, `bcftools/`, `snpeff/`
-- `repeatmodeler/`, `repeatmasker/`, `mcclintock/`
-- `liftoff/`, `augustus/`, `antismash/`, `blastp/`, `dbcan/`
-- `targetp/`, `signalp/`, `wolfpsort/`, `deeptmhmm/` (if enabled)
+- `coverage/` read-based coverage metrics
+- `callable/` per-sample and consensus callable BEDs
+- `bcftools_callable/` variants restricted to callable regions
+- `group_specific_variants/` strict group-specific VCFs + summaries
+- `group_specific_variants/phi_base/` PHI-base hits
+- `eggnog/` Fol4287 EggNOG annotations
+- `six_blastp/` SIX screening results
+- `dbcan/` HMM-filtered and protein-level CAZyme summaries
 
 ## Notes
 
-- `workflows/functional_annotation.nf` is present but not called by `main.nf`.
-- The pipeline uses multiple conda environments inside process scripts.
-- Slack notification is sent on completion if `SLACK_WEBHOOK` is set.
+- This branch keeps several legacy/extended processes for flexibility, but manuscript-aligned path is enabled by default.
+- Ensure sample groups and database paths are correct before production runs.

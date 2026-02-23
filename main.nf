@@ -174,6 +174,100 @@ process repeatMasker {
     """
 }
 
+process summarizeTE {
+    tag "$id"
+    publishDir "${params.output_dir}/te_summary/${id}", mode: 'copy'
+
+    input:
+    val id
+    path repeat_lib
+    path masked_fasta
+    path masked_gff
+
+    output:
+    path "${id}_te_family_counts.tsv", emit: family_counts
+    path "${id}_te_chrom_density.tsv", emit: chrom_density
+
+    script:
+    """
+    python - <<'PY'
+    import re
+    from collections import Counter, defaultdict
+
+    sample_id = "${id}"
+    repeat_lib = "${repeat_lib}"
+    masked_fasta = "${masked_fasta}"
+    masked_gff = "${masked_gff}"
+
+    family_to_class = {}
+    with open(repeat_lib, "r", encoding="utf-8") as fh:
+        for line in fh:
+            if not line.startswith(">"):
+                continue
+            header = line[1:].strip()
+            left = header.split("(")[0].strip()
+            if "#" in left:
+                family, klass = left.split("#", 1)
+                family_to_class[family.strip()] = klass.strip()
+
+    chrom_lengths = defaultdict(int)
+    current = None
+    with open(masked_fasta, "r", encoding="utf-8") as fh:
+        for line in fh:
+            if line.startswith(">"):
+                current = line[1:].strip().split()[0]
+                continue
+            if current:
+                chrom_lengths[current] += len(line.strip())
+
+    te_types = {"repeat_region", "transposable_element", "inverted_repeat_region"}
+    family_counts = Counter()
+    class_counts = Counter()
+    chrom_te_bp = Counter()
+
+    with open(masked_gff, "r", encoding="utf-8") as fh:
+        for line in fh:
+            if not line or line.startswith("#"):
+                continue
+            parts = line.rstrip("\\n").split("\\t")
+            if len(parts) < 9:
+                continue
+            chrom, source, feature, start, end, _, _, _, attrs = parts
+            if feature not in te_types and source.lower() != "repeatmasker":
+                continue
+            try:
+                start_i = int(start)
+                end_i = int(end)
+            except ValueError:
+                continue
+            length = max(0, end_i - start_i + 1)
+            chrom_te_bp[chrom] += length
+
+            motif = None
+            m = re.search(r"Motif:([^;\\s]+)", attrs)
+            if m:
+                motif = m.group(1)
+            family = motif if motif else "Unknown"
+            family_counts[family] += 1
+
+            klass = family_to_class.get(family, "Unknown")
+            class_counts[klass] += 1
+
+    with open(f"{sample_id}_te_family_counts.tsv", "w", encoding="utf-8") as out:
+        out.write("Sample\\tFamily\\tClass\\tCount\\n")
+        for family, count in sorted(family_counts.items(), key=lambda x: (-x[1], x[0])):
+            out.write(f"{sample_id}\\t{family}\\t{family_to_class.get(family, 'Unknown')}\\t{count}\\n")
+
+    with open(f"{sample_id}_te_chrom_density.tsv", "w", encoding="utf-8") as out:
+        out.write("Sample\\tChromosome\\tChromLengthBp\\tTEBp\\tTEPercent\\n")
+        for chrom, clen in sorted(chrom_lengths.items()):
+            tebp = chrom_te_bp.get(chrom, 0)
+            pct = (100.0 * tebp / clen) if clen else 0.0
+            out.write(f"{sample_id}\\t{chrom}\\t{clen}\\t{tebp}\\t{pct:.4f}\\n")
+    PY
+    """
+}
+
 // Need to bypass "Is out folder empty?" check in mcclintock.py
 process McClintock {
     tag "$id"
@@ -343,6 +437,45 @@ process BLASTp {
     """
 }
 
+process SIXBlastp {
+    tag "$id"
+    publishDir "${params.output_dir}/six_blastp/${id}", mode: 'copy'
+
+    input:
+    val id
+    path proteins_fasta
+    path six_queries
+
+    output:
+    path "${id}_six_blastp_raw.tsv", emit: raw
+    path "${id}_six_blastp_filtered.tsv", emit: filtered
+
+    script:
+    """
+    source $params.conda_shell
+    conda activate blast
+
+    makeblastdb \
+        -in ${proteins_fasta} \
+        -dbtype prot \
+        -out ${id}_proteome_db
+
+    blastp \
+        -query ${six_queries} \
+        -db ${id}_proteome_db \
+        -evalue ${params.six_blast_evalue} \
+        -num_threads ${params.six_blast_threads} \
+        -outfmt "6 qseqid sseqid pident length qlen slen qstart qend sstart send evalue bitscore qcovs" \
+        -out ${id}_six_blastp_raw.tsv
+
+    awk -v min_qcov="${params.six_min_query_coverage}" -v max_e="${params.six_blast_evalue}" \
+        '(\$11+0) <= (max_e+0) && (\$13+0) >= (min_qcov+0)' \
+        ${id}_six_blastp_raw.tsv > ${id}_six_blastp_filtered.tsv
+
+    conda deactivate
+    """
+}
+
 process dbCAN {
     tag "$id"
     publishDir "${params.output_dir}/dbcan/${id}", mode: 'copy'
@@ -354,6 +487,8 @@ process dbCAN {
     output:
     val id, emit: sample_id
     path "out", emit: cazymes
+    path "${id}_dbcan_hmmer_filtered.tsv", emit: hmmer_filtered
+    path "${id}_dbcan_protein_summary.tsv", emit: protein_summary
 
     script:
     """
@@ -365,8 +500,41 @@ process dbCAN {
         --input_raw_data ${proteins} \
         --output_dir out \
         --db_dir $params.dbcan_db_dir \
-        --methods diamond,hmm,dbCANsub \
-        --threads 4
+        --methods hmm \
+        --hmm_eval ${params.dbcan_hmm_dome} \
+        --threads ${params.dbcan_threads}
+
+    HMM_OUT=""
+    for candidate in out/hmmer.out out/hmm.out out/hmmscan.out; do
+        if [[ -s "\$candidate" ]]; then
+            HMM_OUT="\$candidate"
+            break
+        fi
+    done
+    [[ -n "\$HMM_OUT" ]] || { echo "[dbCAN] HMM output not found in out/"; exit 1; }
+
+    awk -v OFS='\\t' -v thr='${params.dbcan_hmm_dome}' '
+        BEGIN { print "ProteinID","CAZyFamily","domE" }
+        !/^#/ && NF>=5 && \$5 ~ /^([0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?)$/ {
+            family=\$1; protein=\$3; dome=\$5+0;
+            if (dome <= thr+0) print protein, family, dome;
+        }
+    ' "\$HMM_OUT" > ${id}_dbcan_hmmer_filtered.tsv
+
+    awk -v OFS='\\t' '
+        BEGIN { print "ProteinID","CAZyFamilyCount","CAZyFamilies" }
+        NR>1 {
+            protein=\$1; family=\$2;
+            key=protein FS family;
+            if (!seen[key]++) {
+                count[protein]++;
+                fams[protein] = (fams[protein] ? fams[protein]","family : family);
+            }
+        }
+        END {
+            for (p in count) print p, count[p], fams[p];
+        }
+    ' ${id}_dbcan_hmmer_filtered.tsv | sort -k1,1 > ${id}_dbcan_protein_summary.tsv
 
     conda deactivate
     """
@@ -497,10 +665,17 @@ process WoLFPSort {
 
 workflow {
     if (params.skip_deeptmhmm) { println "INFO: Skipping DeepTMHMM\n" }
+    if (!params.enable_chr0_blast_append) { println "INFO: Using RagTag scaffold directly (manuscript-aligned; Chr0 BLAST append disabled)\n" }
+    if (!params.run_mcclintock) { println "INFO: Skipping McClintock (not in manuscript core TE workflow)\n" }
+    println "INFO: Option A enabled: Liftoff annotations are the source of truth for downstream protein/functional analyses\n"
     channel.fromPath(params.samplesheet_path)
         .splitCsv(header: true)
         .map {row -> tuple(row.sample_id, file(row.read1), file(row.read2))}
         .set { samples }
+    six_queries = file(params.six_queries_fasta)
+    if (!six_queries.exists()) {
+        throw new IllegalArgumentException("SIX query FASTA not found at --six_queries_fasta: ${params.six_queries_fasta}")
+    }
 
     reference = file(params.reference_genome)
     reference_fna = file("ref/GCF_000149955.1_ASM14995v2_genomic.fna")
@@ -512,24 +687,37 @@ workflow {
     preprocess_assembly(samples, reference)
     alignment_variant_calling(samples, reference)
 
-    BLASTn(preprocess_assembly.out.sample_id, preprocess_assembly.out.chr0_contigs)
-    appendContigs(BLASTn.out.sample_id, BLASTn.out.blast_results, preprocess_assembly.out.chr0_contigs, preprocess_assembly.out.scaffold)
-    QUAST(appendContigs.out.sample_id, appendContigs.out.final_scaffolds, channel.value("."))
-    Liftoff(appendContigs.out.sample_id, appendContigs.out.final_scaffolds, reference_fna, annotation)
-    AUGUSTUS(appendContigs.out.sample_id, appendContigs.out.final_scaffolds)
-    dbCAN(AUGUSTUS.out.sample_id, AUGUSTUS.out.proteins_faa)
-    BLASTp(AUGUSTUS.out.sample_id, AUGUSTUS.out.proteins_faa)
-    antiSMASH(AUGUSTUS.out.sample_id, AUGUSTUS.out.scaffold, AUGUSTUS.out.genes_gff)
+    def assembly_sample_ids
+    def assembly_scaffolds
+    if (params.enable_chr0_blast_append) {
+        BLASTn(preprocess_assembly.out.sample_id, preprocess_assembly.out.chr0_contigs)
+        appendContigs(BLASTn.out.sample_id, BLASTn.out.blast_results, preprocess_assembly.out.chr0_contigs, preprocess_assembly.out.scaffold)
+        assembly_sample_ids = appendContigs.out.sample_id
+        assembly_scaffolds = appendContigs.out.final_scaffolds
+    } else {
+        assembly_sample_ids = preprocess_assembly.out.sample_id
+        assembly_scaffolds = preprocess_assembly.out.scaffold
+    }
 
-    nucmerMummer(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold, reference_fna)
-    repeatModeler(preprocess_assembly.out.sample_id, preprocess_assembly.out.scaffold)
-    repeatMasker(repeatModeler.out.sample_id, preprocess_assembly.out.scaffold, repeatModeler.out.repeat_lib)
-    read1 = samples.map { it[1] }
-    read2 = samples.map { it[2] }
-    McClintock(repeatMasker.out.sample_id, repeatMasker.out.masked_fasta, repeatModeler.out.repeat_lib, read1, read2, repeatMasker.out.masked_gff)
-
+    QUAST(assembly_sample_ids, assembly_scaffolds, channel.value("."))
+    Liftoff(assembly_sample_ids, assembly_scaffolds, reference_fna, annotation)
     extractProteins(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
-    
+    SIXBlastp(extractProteins.out.sample_id, extractProteins.out.proteins, six_queries)
+    dbCAN(extractProteins.out.sample_id, extractProteins.out.proteins)
+    BLASTp(extractProteins.out.sample_id, extractProteins.out.proteins)
+    antiSMASH(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
+
+    nucmerMummer(assembly_sample_ids, assembly_scaffolds, reference_fna)
+    repeatModeler(assembly_sample_ids, assembly_scaffolds)
+    repeatMasker(repeatModeler.out.sample_id, assembly_scaffolds, repeatModeler.out.repeat_lib)
+    summarizeTE(repeatMasker.out.sample_id, repeatModeler.out.repeat_lib, repeatMasker.out.masked_fasta, repeatMasker.out.masked_gff)
+
+    if (params.run_mcclintock) {
+        read1 = samples.map { it[1] }
+        read2 = samples.map { it[2] }
+        McClintock(repeatMasker.out.sample_id, repeatMasker.out.masked_fasta, repeatModeler.out.repeat_lib, read1, read2, repeatMasker.out.masked_gff)
+    }
+
     if(!params.skip_deeptmhmm) { DeepTMHMM(extractProteins.out.sample_id, extractProteins.out.proteins) }
     TargetP(extractProteins.out.sample_id, extractProteins.out.proteins)
     Signalp(extractProteins.out.sample_id, extractProteins.out.proteins)
