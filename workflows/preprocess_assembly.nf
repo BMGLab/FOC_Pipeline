@@ -1,7 +1,6 @@
 include { fastp } from '../modules/fastp.nf'
 include { FastQC } from '../modules/fastqc.nf'
 include { QUAST } from '../modules/quast.nf'
-include { samTools } from '../modules/samtools.nf'
 include { LAST } from '../modules/last.nf'
 
 process megahitAssembly {
@@ -115,24 +114,73 @@ process extractChr0Contigs {
     """
 }
 
-process minimap2 {
+process bwaCoverageEstimation {
     tag "$id"
-    publishDir "${params.output_dir}/minimap2/${id}", mode: 'copy'
+    publishDir "${params.output_dir}/coverage/${id}", mode: 'copy'
 
     input:
-    val id
+    tuple val(id), path(read1), path(read2)
     path reference
-    path scaffold
 
     output:
-    tuple val(id), path("${id}_aligned.sam"), emit: sam
+    val id, emit: sample_id
+    path "${id}.dedup.bam", emit: bam
+    path "${id}.dedup.bam.bai", emit: bai
+    path "${id}.depth.tsv", emit: depth
+    path "${id}.coverage_metrics.tsv", emit: metrics
 
     script:
     """
     source $params.conda_shell
-    conda activate minimap2
-    minimap2 -ax sr ${reference} ${scaffold} > ${id}_aligned.sam
+    conda activate bwa
+
+    cp ${reference} reference.fa
+    bwa index reference.fa
+    bwa mem -t ${params.coverage_threads} reference.fa ${read1} ${read2} > ${id}.sam
+
     conda deactivate
+    conda activate samtools
+
+    samtools view -@ ${params.coverage_threads} -b ${id}.sam | \
+        samtools sort -@ ${params.coverage_threads} -n -o ${id}.namesort.bam
+    samtools fixmate -@ ${params.coverage_threads} -m ${id}.namesort.bam ${id}.fixmate.bam
+    samtools sort -@ ${params.coverage_threads} -o ${id}.sorted.bam ${id}.fixmate.bam
+    samtools markdup -@ ${params.coverage_threads} -s ${id}.sorted.bam ${id}.dedup.bam
+    samtools index -@ ${params.coverage_threads} ${id}.dedup.bam
+
+    samtools depth -a -@ ${params.coverage_threads} ${id}.dedup.bam > ${id}.depth.tsv
+
+    awk -v sample="${id}" '{
+        tot++;
+        sum += \$3;
+        if (\$3 > 0) cov++;
+    } END {
+        avg = (tot > 0 ? sum / tot : 0);
+        breadth = (tot > 0 ? 100 * cov / tot : 0);
+        printf "%s\\t%.2f\\t%.2f\\n", sample, avg, breadth;
+    }' ${id}.depth.tsv > ${id}.coverage_metrics.tsv
+
+    rm -f ${id}.sam ${id}.namesort.bam ${id}.fixmate.bam ${id}.sorted.bam \
+          reference.fa reference.fa.amb reference.fa.ann reference.fa.bwt reference.fa.pac reference.fa.sa
+    conda deactivate
+    """
+}
+
+process summarizeCoverageMetrics {
+    publishDir "${params.output_dir}/coverage", mode: 'copy'
+
+    input:
+    path metrics_files
+
+    output:
+    path "coverage_summary.tsv", emit: summary
+
+    script:
+    """
+    echo -e "Sample\\tAvgDepthX\\tBreadthPct" > coverage_summary.tsv
+    for f in ${metrics_files}; do
+        cat "\$f" >> coverage_summary.tsv
+    done
     """
 }
 
@@ -150,13 +198,14 @@ workflow preprocess_assembly {
     QUAST(megahit_out.sample_id, megahit_out.contigs, output_dir)
     ragtag_out = ragtagCorrect(megahit_out.sample_id, megahit_out.contigs, reference) | ragtagScaffold
     LAST(ragtag_out.sample_id, ragtag_out.scaffold_fasta, reference)
+    bwaCoverageEstimation(fastp.out.trimmed_reads, reference)
+    summarizeCoverageMetrics(bwaCoverageEstimation.out.metrics.collect())
     extractChr0Contigs(ragtag_out.sample_id, ragtag_out.scaffold_agp, ragtag_out.corrected_contigs)
-    minimap2(ragtag_out.sample_id, ragtag_out.scaffold_fasta, reference)
-    minimap2.out.merge(output_dir).set { minimap2_out_ch }
-    samTools(minimap2_out_ch)
 
     emit:
     sample_id = ragtag_out.sample_id
     chr0_contigs = extractChr0Contigs.out.chr0_contigs
     scaffold = ragtag_out.scaffold_fasta
+    coverage_metrics = bwaCoverageEstimation.out.metrics
+    coverage_summary = summarizeCoverageMetrics.out.summary
 }
