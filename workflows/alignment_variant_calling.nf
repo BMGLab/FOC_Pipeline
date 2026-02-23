@@ -41,15 +41,170 @@ process BCFtools {
     """
     source $params.conda_shell
     conda activate bcftools
-    bcftools mpileup -f ${reference} --max-depth 1000 ${bam} -Ou | bcftools call -mv -Ov -o ${id}_variants.bcf
+    bcftools mpileup \
+        -f ${reference} \
+        --max-depth ${params.avc_mpileup_max_depth} \
+        -q ${params.avc_min_mapq} \
+        -Q ${params.avc_min_baseq} \
+        ${bam} -Ou | \
+    bcftools call \
+        --ploidy ${params.avc_ploidy} \
+        -mv \
+        -Ov \
+        -o ${id}_variants.bcf
 
     bcftools filter \
         -s LowQual \
-        -e 'QUAL<20 || INFO/DP<10' \
+        -e 'QUAL<${params.avc_variant_min_qual} || INFO/DP<${params.avc_variant_min_dp}' \
         -o ${id}_filtered_variants.bcf \
         ${id}_variants.bcf
 
     bcftools view ${id}_filtered_variants.bcf -Ov -o ${id}_filtered_variants.vcf
+    conda deactivate
+    """
+}
+
+process CallableRegions {
+    tag "$id"
+    publishDir "${params.output_dir}/callable/${id}", mode: 'copy'
+
+    input:
+    tuple val(id), path(bam), path(bai)
+    path reference
+
+    output:
+    tuple val(id), path("${id}_callable.bed"), emit: callable_bed
+    path "${id}.mosdepth.summary.txt", emit: mosdepth_summary
+
+    script:
+    """
+    source $params.conda_shell
+    conda activate mosdepth
+    mosdepth \
+        --threads ${params.avc_threads} \
+        --mapq ${params.avc_min_mapq} \
+        ${id} \
+        ${bam}
+    conda deactivate
+
+    source $params.conda_shell
+    conda activate samtools
+    samtools depth \
+        -aa \
+        -q ${params.avc_min_mapq} \
+        -Q ${params.avc_min_baseq} \
+        ${bam} | \
+    awk -v min_cov=${params.avc_min_callable_depth} 'BEGIN{OFS="\\t"}
+        \$3 >= min_cov {
+            chr=\$1; pos=\$2;
+            if (current_chr != chr || pos != prev_pos + 1) {
+                if (current_chr != "") print current_chr, start_pos - 1, prev_pos;
+                current_chr = chr;
+                start_pos = pos;
+            }
+            prev_pos = pos;
+        }
+        END {
+            if (current_chr != "") print current_chr, start_pos - 1, prev_pos;
+        }' > ${id}_callable.bed
+    conda deactivate
+    """
+}
+
+process ConsensusCallableRegions {
+    publishDir "${params.output_dir}/callable", mode: 'copy'
+
+    input:
+    path callable_beds
+    path reference
+
+    output:
+    path "consensus_callable.bed", emit: consensus_bed
+    path "consensus_callable_stats.tsv", emit: consensus_stats
+
+    script:
+    """
+    source $params.conda_shell
+    conda activate samtools
+    samtools faidx ${reference}
+    conda deactivate
+
+    python - <<'PY'
+    import math
+    from collections import defaultdict
+
+    ref_fai = "${reference}.fai"
+    bed_files = "${callable_beds}".split()
+    frac = float("${params.avc_consensus_callable_fraction}")
+
+    chrom_lengths = {}
+    with open(ref_fai, "r", encoding="utf-8") as fh:
+        for line in fh:
+            cols = line.rstrip("\\n").split("\\t")
+            chrom_lengths[cols[0]] = int(cols[1])
+
+    n = len(bed_files)
+    if n == 0:
+        raise SystemExit("No callable BED files were provided.")
+    k = max(1, math.ceil(n * frac))
+
+    events = defaultdict(list)
+    for bed in bed_files:
+        with open(bed, "r", encoding="utf-8") as fh:
+            for line in fh:
+                if not line.strip() or line.startswith("#"):
+                    continue
+                chrom, s, e = line.rstrip("\\n").split("\\t")[:3]
+                start = int(s)
+                end = int(e)
+                if chrom not in chrom_lengths:
+                    continue
+                events[chrom].append((start, 1))
+                events[chrom].append((end, -1))
+
+    total_callable = 0
+    total_genome = sum(chrom_lengths.values())
+    with open("consensus_callable.bed", "w", encoding="utf-8") as out_bed:
+        for chrom, clen in chrom_lengths.items():
+            chrom_events = sorted(events.get(chrom, []))
+            if not chrom_events:
+                continue
+            cov = 0
+            prev = 0
+            for pos, delta in chrom_events:
+                if pos > prev and cov >= k:
+                    out_bed.write(f"{chrom}\\t{prev}\\t{pos}\\n")
+                    total_callable += (pos - prev)
+                cov += delta
+                prev = pos
+            if prev < clen and cov >= k:
+                out_bed.write(f"{chrom}\\t{prev}\\t{clen}\\n")
+                total_callable += (clen - prev)
+
+    pct = (100.0 * total_callable / total_genome) if total_genome else 0.0
+    with open("consensus_callable_stats.tsv", "w", encoding="utf-8") as out_stats:
+        out_stats.write("NumSamples\\tKThreshold\\tFraction\\tCallableBp\\tGenomeBp\\tCallablePct\\n")
+        out_stats.write(f"{n}\\t{k}\\t{frac:.4f}\\t{total_callable}\\t{total_genome}\\t{pct:.4f}\\n")
+    PY
+    """
+}
+
+process RestrictVariantsToCallable {
+    tag "$id"
+    publishDir "${params.output_dir}/bcftools_callable/${id}", mode: 'copy'
+
+    input:
+    tuple val(id), path(vcf)
+    path consensus_bed
+
+    output:
+    tuple val(id), path("${id}_callable_filtered_variants.vcf"), emit: vcf
+
+    script:
+    """
+    source $params.conda_shell
+    conda activate bcftools
+    bcftools view -R ${consensus_bed} ${vcf} -Ov -o ${id}_callable_filtered_variants.vcf
     conda deactivate
     """
 }
@@ -108,6 +263,9 @@ workflow alignment_variant_calling {
     Bowtie2(fastp.out.trimmed_reads, ref_gz)
     Bowtie2.out.sam.merge(output_dir).set { bowtie2_ch }
     samTools(bowtie2_ch)
+    CallableRegions(samTools.out.bam_bai, ref)
+    ConsensusCallableRegions(CallableRegions.out.callable_bed.collect(), ref)
     BCFtools(samTools.out.bam_bai, ref)
-    SnpEff(BCFtools.out.vcf)
+    RestrictVariantsToCallable(BCFtools.out.vcf, ConsensusCallableRegions.out.consensus_bed)
+    SnpEff(RestrictVariantsToCallable.out.vcf)
 }

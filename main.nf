@@ -487,6 +487,8 @@ process dbCAN {
     output:
     val id, emit: sample_id
     path "out", emit: cazymes
+    path "${id}_dbcan_hmmer_filtered.tsv", emit: hmmer_filtered
+    path "${id}_dbcan_protein_summary.tsv", emit: protein_summary
 
     script:
     """
@@ -498,8 +500,41 @@ process dbCAN {
         --input_raw_data ${proteins} \
         --output_dir out \
         --db_dir $params.dbcan_db_dir \
-        --methods diamond,hmm,dbCANsub \
-        --threads 4
+        --methods hmm \
+        --hmm_eval ${params.dbcan_hmm_dome} \
+        --threads ${params.dbcan_threads}
+
+    HMM_OUT=""
+    for candidate in out/hmmer.out out/hmm.out out/hmmscan.out; do
+        if [[ -s "\$candidate" ]]; then
+            HMM_OUT="\$candidate"
+            break
+        fi
+    done
+    [[ -n "\$HMM_OUT" ]] || { echo "[dbCAN] HMM output not found in out/"; exit 1; }
+
+    awk -v OFS='\\t' -v thr='${params.dbcan_hmm_dome}' '
+        BEGIN { print "ProteinID","CAZyFamily","domE" }
+        !/^#/ && NF>=5 && \$5 ~ /^([0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?)$/ {
+            family=\$1; protein=\$3; dome=\$5+0;
+            if (dome <= thr+0) print protein, family, dome;
+        }
+    ' "\$HMM_OUT" > ${id}_dbcan_hmmer_filtered.tsv
+
+    awk -v OFS='\\t' '
+        BEGIN { print "ProteinID","CAZyFamilyCount","CAZyFamilies" }
+        NR>1 {
+            protein=\$1; family=\$2;
+            key=protein FS family;
+            if (!seen[key]++) {
+                count[protein]++;
+                fams[protein] = (fams[protein] ? fams[protein]","family : family);
+            }
+        }
+        END {
+            for (p in count) print p, count[p], fams[p];
+        }
+    ' ${id}_dbcan_hmmer_filtered.tsv | sort -k1,1 > ${id}_dbcan_protein_summary.tsv
 
     conda deactivate
     """
