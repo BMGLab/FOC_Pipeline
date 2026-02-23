@@ -200,11 +200,15 @@ workflow preprocess_assembly {
     LAST(ragtag_out.sample_id, ragtag_out.scaffold_fasta, reference)
     bwaCoverageEstimation(fastp.out.trimmed_reads, reference)
     summarizeCoverageMetrics(bwaCoverageEstimation.out.metrics.collect())
-    extractChr0Contigs(ragtag_out.sample_id, ragtag_out.scaffold_agp, ragtag_out.corrected_contigs)
+    def chr0_contigs_out = Channel.empty()
+    if (params.enable_chr0_blast_append) {
+        extractChr0Contigs(ragtag_out.sample_id, ragtag_out.scaffold_agp, ragtag_out.corrected_contigs)
+        chr0_contigs_out = extractChr0Contigs.out.chr0_contigs
+    }
 
     emit:
     sample_id = ragtag_out.sample_id
-    chr0_contigs = extractChr0Contigs.out.chr0_contigs
+    chr0_contigs = chr0_contigs_out
     scaffold = ragtag_out.scaffold_fasta
     coverage_metrics = bwaCoverageEstimation.out.metrics
     coverage_summary = summarizeCoverageMetrics.out.summary
