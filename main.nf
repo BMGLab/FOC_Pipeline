@@ -437,6 +437,45 @@ process BLASTp {
     """
 }
 
+process SIXBlastp {
+    tag "$id"
+    publishDir "${params.output_dir}/six_blastp/${id}", mode: 'copy'
+
+    input:
+    val id
+    path proteins_fasta
+    path six_queries
+
+    output:
+    path "${id}_six_blastp_raw.tsv", emit: raw
+    path "${id}_six_blastp_filtered.tsv", emit: filtered
+
+    script:
+    """
+    source $params.conda_shell
+    conda activate blast
+
+    makeblastdb \
+        -in ${proteins_fasta} \
+        -dbtype prot \
+        -out ${id}_proteome_db
+
+    blastp \
+        -query ${six_queries} \
+        -db ${id}_proteome_db \
+        -evalue ${params.six_blast_evalue} \
+        -num_threads ${params.six_blast_threads} \
+        -outfmt "6 qseqid sseqid pident length qlen slen qstart qend sstart send evalue bitscore qcovs" \
+        -out ${id}_six_blastp_raw.tsv
+
+    awk -v min_qcov="${params.six_min_query_coverage}" -v max_e="${params.six_blast_evalue}" \
+        '(\$11+0) <= (max_e+0) && (\$13+0) >= (min_qcov+0)' \
+        ${id}_six_blastp_raw.tsv > ${id}_six_blastp_filtered.tsv
+
+    conda deactivate
+    """
+}
+
 process dbCAN {
     tag "$id"
     publishDir "${params.output_dir}/dbcan/${id}", mode: 'copy'
@@ -598,6 +637,10 @@ workflow {
         .splitCsv(header: true)
         .map {row -> tuple(row.sample_id, file(row.read1), file(row.read2))}
         .set { samples }
+    six_queries = file(params.six_queries_fasta)
+    if (!six_queries.exists()) {
+        throw new IllegalArgumentException("SIX query FASTA not found at --six_queries_fasta: ${params.six_queries_fasta}")
+    }
 
     reference = file(params.reference_genome)
     reference_fna = file("ref/GCF_000149955.1_ASM14995v2_genomic.fna")
@@ -624,6 +667,7 @@ workflow {
     QUAST(assembly_sample_ids, assembly_scaffolds, channel.value("."))
     Liftoff(assembly_sample_ids, assembly_scaffolds, reference_fna, annotation)
     extractProteins(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
+    SIXBlastp(extractProteins.out.sample_id, extractProteins.out.proteins, six_queries)
     dbCAN(extractProteins.out.sample_id, extractProteins.out.proteins)
     BLASTp(extractProteins.out.sample_id, extractProteins.out.proteins)
     antiSMASH(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
