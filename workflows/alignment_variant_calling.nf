@@ -209,6 +209,155 @@ process RestrictVariantsToCallable {
     """
 }
 
+process GroupSpecificVariants {
+    publishDir "${params.output_dir}/group_specific_variants", mode: 'copy'
+
+    input:
+    path callable_vcfs
+    path group_map
+
+    output:
+    path "merged_callable_variants.vcf", emit: merged_vcf
+    path "group_specific_summary.tsv", emit: summary
+    path "group_specific/*.vcf", emit: group_vcfs
+
+    script:
+    """
+    source $params.conda_shell
+    conda activate bcftools
+
+    renamed_vcfs=()
+    for vcf in ${callable_vcfs}; do
+        id=\$(basename "\$vcf" | sed 's/_callable_filtered_variants\\.vcf\$//')
+        echo "\$id" > "\${id}.sample_name.txt"
+        bcftools reheader -s "\${id}.sample_name.txt" -o "\${id}.renamed.vcf" "\$vcf"
+        renamed_vcfs+=("\${id}.renamed.vcf")
+    done
+
+    bcftools merge -Ov -o merged_callable_variants.vcf "\${renamed_vcfs[@]}"
+    conda deactivate
+
+    python - <<'PY'
+    from collections import defaultdict
+    from pathlib import Path
+
+    group_map_path = Path("${group_map}")
+    merged_vcf_path = Path("merged_callable_variants.vcf")
+    out_dir = Path("group_specific")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    sample_to_group = {}
+    with group_map_path.open("r", encoding="utf-8") as fh:
+        for i, line in enumerate(fh, start=1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            cols = line.split("\\t")
+            if len(cols) < 2:
+                raise SystemExit(f"Invalid group map at line {i}: expected 'sample_id<TAB>group'")
+            sample_to_group[cols[0]] = cols[1]
+
+    meta = []
+    header = None
+    samples = []
+    with merged_vcf_path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            if line.startswith("##"):
+                meta.append(line)
+                continue
+            if line.startswith("#CHROM"):
+                header = line
+                samples = line.rstrip("\\n").split("\\t")[9:]
+                break
+
+    if not samples:
+        raise SystemExit("No samples found in merged VCF.")
+
+    missing = [s for s in samples if s not in sample_to_group]
+    if missing:
+        raise SystemExit(f"Samples missing in group map: {', '.join(missing)}")
+
+    groups = sorted(set(sample_to_group[s] for s in samples))
+    if len(groups) < 2:
+        raise SystemExit("Need at least two groups for strict group-specific variant calling.")
+
+    group_samples = {g: [s for s in samples if sample_to_group[s] == g] for g in groups}
+    counts = defaultdict(int)
+
+    handles = {}
+    for g in groups:
+        out_path = out_dir / f"{g}_strict_specific.vcf"
+        h = out_path.open("w", encoding="utf-8")
+        for m in meta:
+            h.write(m)
+        h.write(header)
+        handles[g] = h
+
+    def parse_gt(sample_field, gt_idx):
+        parts = sample_field.split(":")
+        if gt_idx >= len(parts):
+            return "./."
+        return parts[gt_idx]
+
+    def is_callable(gt):
+        return gt not in {".", "./.", ".|."}
+
+    def has_alt(gt):
+        if not is_callable(gt):
+            return False
+        alleles = gt.replace("|", "/").split("/")
+        return all(a != "." for a in alleles) and any(a != "0" for a in alleles)
+
+    def is_ref(gt):
+        if not is_callable(gt):
+            return False
+        alleles = gt.replace("|", "/").split("/")
+        return all(a == "0" for a in alleles)
+
+    with merged_vcf_path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            if line.startswith("#"):
+                continue
+            cols = line.rstrip("\\n").split("\\t")
+            if len(cols) < 10:
+                continue
+
+            fmt_keys = cols[8].split(":")
+            if "GT" not in fmt_keys:
+                continue
+            gt_idx = fmt_keys.index("GT")
+            sample_fields = cols[9:]
+            gt_by_sample = {
+                sample: parse_gt(field, gt_idx)
+                for sample, field in zip(samples, sample_fields)
+            }
+
+            matched_group = None
+            for g in groups:
+                in_group = group_samples[g]
+                out_group = [s for s in samples if s not in in_group]
+                if not in_group or not out_group:
+                    continue
+                if all(has_alt(gt_by_sample[s]) for s in in_group) and \
+                   all(is_ref(gt_by_sample[s]) for s in out_group):
+                    matched_group = g
+                    break
+
+            if matched_group:
+                handles[matched_group].write(line)
+                counts[matched_group] += 1
+
+    for h in handles.values():
+        h.close()
+
+    with Path("group_specific_summary.tsv").open("w", encoding="utf-8") as out:
+        out.write("Group\\tNumSamples\\tStrictSpecificVariantCount\\n")
+        for g in groups:
+            out.write(f"{g}\\t{len(group_samples[g])}\\t{counts[g]}\\n")
+    PY
+    """
+}
+
 process SnpEff {
     tag "$id"
     publishDir "${params.output_dir}/snpeff/${id}", mode: 'copy'
@@ -257,6 +406,7 @@ workflow alignment_variant_calling {
 
     main:
     ref = file('ref/GCF_000149955.1_ASM14995v2_genomic.fna')
+    group_map = file(params.avc_group_map)
     def output_dir = channel.value("${params.avc_wf_output}")
     samples.merge(output_dir).set { samples_ch }
     fastp(samples_ch)
@@ -267,5 +417,11 @@ workflow alignment_variant_calling {
     ConsensusCallableRegions(CallableRegions.out.callable_bed.collect(), ref)
     BCFtools(samTools.out.bam_bai, ref)
     RestrictVariantsToCallable(BCFtools.out.vcf, ConsensusCallableRegions.out.consensus_bed)
+    if (params.avc_run_group_specific) {
+        if (!group_map.exists()) {
+            throw new IllegalArgumentException("Group map not found at --avc_group_map: ${params.avc_group_map}")
+        }
+        GroupSpecificVariants(RestrictVariantsToCallable.out.vcf.map { id, vcf -> vcf }.collect(), group_map)
+    }
     SnpEff(RestrictVariantsToCallable.out.vcf)
 }
