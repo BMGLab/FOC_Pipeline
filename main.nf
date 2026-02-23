@@ -593,6 +593,7 @@ workflow {
     if (params.skip_deeptmhmm) { println "INFO: Skipping DeepTMHMM\n" }
     if (!params.enable_chr0_blast_append) { println "INFO: Using RagTag scaffold directly (manuscript-aligned; Chr0 BLAST append disabled)\n" }
     if (!params.run_mcclintock) { println "INFO: Skipping McClintock (not in manuscript core TE workflow)\n" }
+    println "INFO: Option A enabled: Liftoff annotations are the source of truth for downstream protein/functional analyses\n"
     channel.fromPath(params.samplesheet_path)
         .splitCsv(header: true)
         .map {row -> tuple(row.sample_id, file(row.read1), file(row.read2))}
@@ -622,10 +623,10 @@ workflow {
 
     QUAST(assembly_sample_ids, assembly_scaffolds, channel.value("."))
     Liftoff(assembly_sample_ids, assembly_scaffolds, reference_fna, annotation)
-    AUGUSTUS(assembly_sample_ids, assembly_scaffolds)
-    dbCAN(AUGUSTUS.out.sample_id, AUGUSTUS.out.proteins_faa)
-    BLASTp(AUGUSTUS.out.sample_id, AUGUSTUS.out.proteins_faa)
-    antiSMASH(AUGUSTUS.out.sample_id, AUGUSTUS.out.scaffold, AUGUSTUS.out.genes_gff)
+    extractProteins(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
+    dbCAN(extractProteins.out.sample_id, extractProteins.out.proteins)
+    BLASTp(extractProteins.out.sample_id, extractProteins.out.proteins)
+    antiSMASH(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
 
     nucmerMummer(assembly_sample_ids, assembly_scaffolds, reference_fna)
     repeatModeler(assembly_sample_ids, assembly_scaffolds)
@@ -638,8 +639,6 @@ workflow {
         McClintock(repeatMasker.out.sample_id, repeatMasker.out.masked_fasta, repeatModeler.out.repeat_lib, read1, read2, repeatMasker.out.masked_gff)
     }
 
-    extractProteins(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
-    
     if(!params.skip_deeptmhmm) { DeepTMHMM(extractProteins.out.sample_id, extractProteins.out.proteins) }
     TargetP(extractProteins.out.sample_id, extractProteins.out.proteins)
     Signalp(extractProteins.out.sample_id, extractProteins.out.proteins)
