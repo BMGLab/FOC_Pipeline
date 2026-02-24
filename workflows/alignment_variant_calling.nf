@@ -365,11 +365,11 @@ process AnnotateGroupSpecificVariants {
     path group_vcf
 
     output:
-    tuple val(group_name), path("${group_name}_strict_specific.annotated.vcf"), emit: annotated_vcf
+    tuple val(group_vcf.baseName.replaceFirst(/_strict_specific$/, '')), path("*.annotated.vcf"), emit: annotated_vcf
 
     script:
-    def base = group_vcf.getBaseName()
-    def group_name = base.replaceFirst(/_strict_specific$/, '')
+    def group_name = group_vcf.getBaseName().replaceFirst(/_strict_specific$/, '')
+
     """
     source $params.conda_shell
     export JAVA_HOME=${params.home}/miniconda3/envs/snpeff

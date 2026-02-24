@@ -373,7 +373,7 @@ process dbCAN {
 
     awk -v OFS='\\t' -v thr='${params.dbcan_hmm_dome}' '
         BEGIN { print "ProteinID","CAZyFamily","domE" }
-        !/^#/ && NF>=5 && \$5 ~ /^([0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?)$/ {
+        !/^#/ && NF>=5 && \$5 ~ /^([0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?)\$/ {
             family=\$1; protein=\$3; dome=\$5+0;
             if (dome <= thr+0) print protein, family, dome;
         }

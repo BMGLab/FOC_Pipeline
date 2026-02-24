@@ -190,7 +190,7 @@ workflow preprocess_assembly {
     reference
 
     main:
-    def output_dir = Channel.value("${params.pa_wf_output}")
+    def output_dir = channel.value("${params.pa_wf_output}")
     samples.merge(output_dir).set{ samples_ch }
     fastp(samples_ch)
     FastQC(samples_ch)
@@ -200,7 +200,7 @@ workflow preprocess_assembly {
     LAST(ragtag_out.sample_id, ragtag_out.scaffold_fasta, reference)
     bwaCoverageEstimation(fastp.out.trimmed_reads, reference)
     summarizeCoverageMetrics(bwaCoverageEstimation.out.metrics.collect())
-    def chr0_contigs_out = Channel.empty()
+    def chr0_contigs_out = channel.empty()
     if (params.enable_chr0_blast_append) {
         extractChr0Contigs(ragtag_out.sample_id, ragtag_out.scaffold_agp, ragtag_out.corrected_contigs)
         chr0_contigs_out = extractChr0Contigs.out.chr0_contigs
