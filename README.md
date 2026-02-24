@@ -1,30 +1,56 @@
 # Whole-genome assemblies and comparative genomics of Fusarium oxysporum f. sp. capsici Pipeline
 
-Nextflow DSL2 pipeline for assembly processing, variant discovery, TE analysis, gene/protein functional annotation, and group-specific variant interpretation.
+Nextflow DSL2 pipeline for assembly/scaffolding, coverage and variant analysis, repeat profiling, and downstream protein/functional analyses.
 
-## Main entrypoints
+## Entry points
 
 - `main.nf`
 - `workflows/preprocess_assembly.nf`
 - `workflows/alignment_variant_calling.nf`
 
-## Pipeline components
+## Workflow summary
 
-- Read QC and trimming: `FastQC`, `fastp`
-- Assembly/scaffolding: `megahit`, `ragtag`
-- Coverage estimation: `bwa mem` + `samtools` depth metrics
-- Variant calling: `Bowtie2`, `bcftools`, `SnpEff`
-- Callable genome workflow: `mosdepth` + `samtools depth` + consensus callable BED
-- Group-specific variants: strict per-group variant extraction
-- TE analysis: `RepeatModeler`, `RepeatMasker` (optional `McClintock`)
-- Gene/protein analyses: `Liftoff`, `antiSMASH`, `BLASTp` (MEROPS), `dbCAN`, `SIX BLASTp`, `TargetP`, `SignalP`, `WoLFPSort`, optional `DeepTMHMM`
-- Functional annotation for group-specific candidates: EggNOG + PHI-base BLASTp
+1. Read QC and trimming
+- `FastQC`, `fastp`
 
-## Required inputs
+2. Assembly and scaffolding
+- `megahit`, `ragtag`, `QUAST`, `LAST`
+- Optional Chr0 append flow via BLAST (`BLASTn` + `appendContigs`)
 
-### 1) Samplesheet
+3. Coverage estimation
+- Read-to-reference mapping with `bwa mem`
+- Duplicate handling and depth/breadth summary using `samtools`
+- Per-sample metrics plus combined coverage summary
 
-CSV with header:
+4. Variant calling and annotation
+- `Bowtie2` alignment
+- `bcftools mpileup/call/filter` with configurable MQ/BQ/ploidy thresholds
+- Callable-region workflow: `mosdepth` + `samtools depth`
+- Consensus callable BED generation across samples
+- Restriction of variants to callable regions
+- `SnpEff` annotation
+
+5. Group-specific variant analysis (optional)
+- Strict group-specific variant extraction from callable-filtered VCFs
+- Optional downstream annotation branch:
+  - Group VCF annotation
+  - Candidate gene/protein extraction
+  - `PHI-base` BLASTp
+  - `EggNOG` annotation on Fol4287 proteins
+
+6. Repeat/TE and protein analyses
+- `RepeatModeler`, `RepeatMasker`
+- TE summary tables per sample
+- Optional `McClintock`
+- `Liftoff` gene transfer + protein extraction
+- `SIX` BLASTp screening
+- `dbCAN` (HMM mode)
+- `TargetP`, `SignalP`, `WoLFPSort`
+
+## Inputs
+
+### Samplesheet
+Default: `samplesheet.csv`
 
 ```csv
 sample_id,read1,read2
@@ -32,11 +58,9 @@ sample_id,read1,read2
 35,/path/sample35_R1.fastq.gz,/path/sample35_R2.fastq.gz
 ```
 
-Default: `samplesheet.csv`
-
-### 2) Group map
-
-TSV format:
+### Group map
+Used when `--avc_run_group_specific true`.
+Default: `samplesheets/group_map.tsv`
 
 ```tsv
 # sample_id	group
@@ -46,20 +70,17 @@ TSV format:
 42	GroupA
 ```
 
-Default: `samplesheets/group_map.tsv`
+### External resources
+Configure in `nextflow.config` or via CLI params:
 
-### 3) External resources
-
-Configure paths in `nextflow.config` or via CLI:
-
-- BLAST databases (nt/MEROPS/PHI-base)
-- SIX query FASTA
+- BLAST DBs and query FASTA (including SIX queries)
 - dbCAN database
+- PHI-base BLAST database
 - EggNOG data directory
-- SnpEff DB/JAR
-- Tool paths (Conda env/tool binaries)
+- SnpEff DB/JAR paths
+- Tool paths and conda shell path
 
-## Running
+## Run
 
 ```bash
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -71,28 +92,32 @@ nextflow run main.nf --samplesheet_path samplesheet.csv -with-report
 
 - `--output_dir`
 - `--samplesheet_path`
+- `--reference_genome`
+- `--enable_chr0_blast_append`
+- `--run_mcclintock`
+- `--coverage_threads`
+- `--six_queries_fasta`
 - `--avc_group_map`
 - `--avc_run_group_specific`
 - `--avc_run_group_functional_annotation`
-- `--enable_chr0_blast_append`
-- `--run_mcclintock`
-- `--skip_deeptmhmm`
+- `--avc_min_mapq`
+- `--avc_min_baseq`
+- `--avc_min_callable_depth`
+- `--avc_consensus_callable_fraction`
+- `--avc_ploidy`
 
-## Outputs (high level)
+## Outputs (high-level)
 
-Under `results/` (default):
+Default base: `results/`
 
 - `coverage/`
-- `callable/`
-- `bcftools_callable/`
-- `group_specific_variants/`
-- `eggnog/`
-- `six_blastp/`
-- `dbcan/`
-- `repeatmodeler/`, `repeatmasker/`
-- `liftoff/`, `antismash/`, `blastp/`, `snpeff/`
+- `assembly/`, `ragtag/`, `chr0_contigs/`, `appended_contigs/`
+- `alignment/`, `samtools/`, `bcftools/`, `bcftools_callable/`, `snpeff/`, `callable/`
+- `group_specific_variants/`, `eggnog/`
+- `repeatmodeler/`, `repeatmasker/`, `te_summary/`, `mcclintock/`
+- `liftoff/`, `dbcan/`, `six_blastp/`, `targetp/`, `signalp/`, `wolfpsort/`
 
 ## Notes
 
-- Optional analysis modules can be enabled/disabled with config flags.
-- Validate group map and database paths before production runs.
+- Optional branches are controlled by config flags.
+- Validate all database/tool paths before production runs.

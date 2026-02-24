@@ -346,96 +346,6 @@ process Liftoff {
     """
 }
 
-process AUGUSTUS {
-    tag "$id"
-    publishDir "${params.output_dir}/augustus/${id}", mode: 'copy'
-
-    input:
-    val id
-    path assembly
-
-    output:
-    val id, emit: sample_id
-    path "${id}_augustus_predictions.gff", emit: genes_gff
-    path assembly, emit: scaffold
-    path "${id}_augustus_predictions.faa", emit: proteins_faa
-
-    script:
-    """
-    source $params.conda_shell
-    conda activate augustus
-
-    augustus \
-        --species=fol \
-        --gff3=on \
-        --outfile=${id}_augustus_predictions.gff \
-        $assembly
-
-    getAnnoFasta.pl ${id}_augustus_predictions.gff
-    mv ${id}_augustus_predictions.aa ${id}_augustus_predictions.faa
-
-    conda deactivate
-    """
-}
-
-process antiSMASH {
-    tag "$id"
-    publishDir "${params.output_dir}/antismash/${id}", mode: 'copy'
-
-    input:
-    val id
-    path assembly
-    path gff3
-
-    output:
-    path "${id}_antismash_results/", emit: antismash
-
-    script:
-    """
-    source $params.conda_shell
-    conda activate agat
-    agat_sp_manage_IDs.pl --gff ${gff3} -o ${id}_fixed_genes.gff
-    agat_sp_fix_cds_phases.pl --gff ${id}_fixed_genes.gff --fasta ${assembly} -o ${id}_fixed_genes_phased.gff
-    agat_sp_fix_features_locations_duplicated.pl --gff ${id}_fixed_genes_phased.gff -o ${id}_fixed_genes_phased_deduped.gff
-    agat_sp_keep_longest_isoform.pl -g ${id}_fixed_genes_phased_deduped.gff -o no_redundant_isoforms.gff
-    conda deactivate
-    conda activate antismash
-    antismash --taxon fungi \
-                --cpus 28 \
-                --output-dir ${id}_antismash_results \
-                --fullhmmer --clusterhmmer --cc-mibig --cb-general --cb-knownclusters \
-                --genefinding-gff3 no_redundant_isoforms.gff \
-                ${assembly}
-    conda deactivate
-    """
-}
-
-process BLASTp {
-    tag "$id"
-    publishDir "${params.output_dir}/blastp/${id}", mode: 'copy'
-
-    input:
-    val id
-    path proteins_fasta
-
-    output:
-    path "${id}_blastp_merops.txt", emit: blastp_merops
-
-    script:
-    def merops_db = file("${params.merops_db_dir}")
-    """
-    source $params.conda_shell
-    conda activate blast
-    blastp -query $proteins_fasta \
-           -db ${merops_db} \
-           -out ${id}_blastp_merops.txt \
-           -evalue 1e-5 \
-           -num_threads 28 \
-           -max_target_seqs 10 \
-           -outfmt 6
-    conda deactivate
-    """
-}
 
 process SIXBlastp {
     tag "$id"
@@ -573,28 +483,6 @@ process extractProteins {
     """
 }
 
-process DeepTMHMM {
-    tag "$id"
-    publishDir "${params.output_dir}/deeptmhmm/${id}", mode: 'copy'
-
-    input:
-    val id
-    path protein_fasta
-
-    output:
-    path("${id}_tmhmm.out"), emit: tmhmm_out
-
-    script:
-    """
-    source $params.conda_shell
-    conda activate deeptmhmm
-
-    biolib run --local 'DTU/DeepTMHMM:1.0.24' --fasta ${protein_fasta} > ${id}_tmhmm.out
-
-    conda deactivate
-    """
-}
-
 process TargetP {
     tag "$id"
     publishDir "${params.output_dir}/targetp/${id}", mode: 'copy'
@@ -664,7 +552,6 @@ process WoLFPSort {
 }
 
 workflow {
-    if (params.skip_deeptmhmm) { println "INFO: Skipping DeepTMHMM\n" }
     if (!params.enable_chr0_blast_append) { println "INFO: Using RagTag scaffold directly (manuscript-aligned; Chr0 BLAST append disabled)\n" }
     if (!params.run_mcclintock) { println "INFO: Skipping McClintock (not in manuscript core TE workflow)\n" }
     println "INFO: Option A enabled: Liftoff annotations are the source of truth for downstream protein/functional analyses\n"
@@ -704,8 +591,6 @@ workflow {
     extractProteins(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
     SIXBlastp(extractProteins.out.sample_id, extractProteins.out.proteins, six_queries)
     dbCAN(extractProteins.out.sample_id, extractProteins.out.proteins)
-    BLASTp(extractProteins.out.sample_id, extractProteins.out.proteins)
-    antiSMASH(Liftoff.out.sample_id, Liftoff.out.scaffold, Liftoff.out.genes_gff)
 
     nucmerMummer(assembly_sample_ids, assembly_scaffolds, reference_fna)
     repeatModeler(assembly_sample_ids, assembly_scaffolds)
@@ -718,7 +603,6 @@ workflow {
         McClintock(repeatMasker.out.sample_id, repeatMasker.out.masked_fasta, repeatModeler.out.repeat_lib, read1, read2, repeatMasker.out.masked_gff)
     }
 
-    if(!params.skip_deeptmhmm) { DeepTMHMM(extractProteins.out.sample_id, extractProteins.out.proteins) }
     TargetP(extractProteins.out.sample_id, extractProteins.out.proteins)
     Signalp(extractProteins.out.sample_id, extractProteins.out.proteins)
     WoLFPSort(extractProteins.out.sample_id, extractProteins.out.proteins)
