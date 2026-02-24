@@ -268,58 +268,6 @@ process summarizeTE {
     """
 }
 
-// Need to bypass "Is out folder empty?" check in mcclintock.py
-process McClintock {
-    tag "$id"
-    publishDir "${params.output_dir}/mcclintock/${id}", mode: 'copy'
-
-    input:
-    val id
-    path reference
-    path consensus
-    path read1
-    path read2
-    path locations
-
-    output:
-    path "out/*", emit: results
-
-    script:
-    def read1_name_fq = read1.getBaseName()
-    def read1_name = read1_name_fq.substring(0, read1_name_fq.lastIndexOf('.'))
-    """
-    source $params.conda_shell
-    conda activate mcclintock
-
-    python - <<EOF
-    import re
-    def clean_fasta_headers(input_file):
-        output_file = input_file + "_cleaned"
-        with open(input_file, "r") as infile, open(output_file, "w") as outfile:
-            for line in infile:
-                if line.startswith(">"):
-                    clean_header = re.sub(r"[^a-zA-Z0-9_.#>]", "_", line.strip())
-                    outfile.write(clean_header + "\\n")
-                else:
-                    outfile.write(line)
-        return output_file
-    cleaned_consensus = clean_fasta_headers("${consensus}")
-    EOF
-
-    mkdir -p out/${read1_name}/results/relocate2/unfiltered/repeat/results
-    python $params.mcclintock \
-        --reference ${reference} \
-        --consensus ${consensus}_cleaned \
-        --first ${read1} \
-        --second ${read2} \
-        --proc 28 \
-        --out out \
-        --methods ngs_te_mapper2,relocate2,tebreak \
-        --keep_intermediate all
-    conda deactivate
-    """
-}
-
 process Liftoff {
     tag "$id"
     publishDir "${params.output_dir}/liftoff/${id}", mode: 'copy'
@@ -596,12 +544,6 @@ workflow {
     repeatModeler(assembly_sample_ids, assembly_scaffolds)
     repeatMasker(repeatModeler.out.sample_id, assembly_scaffolds, repeatModeler.out.repeat_lib)
     summarizeTE(repeatMasker.out.sample_id, repeatModeler.out.repeat_lib, repeatMasker.out.masked_fasta, repeatMasker.out.masked_gff)
-
-    if (params.run_mcclintock) {
-        read1 = samples.map { it[1] }
-        read2 = samples.map { it[2] }
-        McClintock(repeatMasker.out.sample_id, repeatMasker.out.masked_fasta, repeatModeler.out.repeat_lib, read1, read2, repeatMasker.out.masked_gff)
-    }
 
     TargetP(extractProteins.out.sample_id, extractProteins.out.proteins)
     Signalp(extractProteins.out.sample_id, extractProteins.out.proteins)
