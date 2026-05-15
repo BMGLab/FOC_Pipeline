@@ -42,8 +42,8 @@ utilities/
 
 ### Tools
 
--FastQC
--fastp
+- FastQC
+- fastp
 
 ### Outputs
 
@@ -57,12 +57,12 @@ fastp/
 
 ### Tools
 
--MEGAHIT
--RagTag
--QUAST
--LAST
--nucmer
--mummerplot
+- MEGAHIT
+- RagTag
+- QUAST
+- LAST
+- nucmer
+- mummerplot
 
 ### Workflow
 
@@ -86,9 +86,9 @@ synteny/
 
 ### Tools
 
--RepeatModeler
--RepeatMasker
--McClintock (optional)
+- RepeatModeler
+- RepeatMasker
+- McClintock (optional)
 
 ### Workflow
 
@@ -111,9 +111,9 @@ te_summary/
 
 ### Tools 
 
--Liftoff
--AUGUSTUS
--AGAT
+- Liftoff
+- AUGUSTUS
+- AGAT
 
 ### Outputs
 
