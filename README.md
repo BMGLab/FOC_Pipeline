@@ -1,26 +1,211 @@
-# FoxGenome_wd
+# Comparative Genomic Analysis of Fusarium oxysporum f. sp. lycopercisi Pipeline
 
-Nextflow DSL2 workflow for fungal genome assembly refinement, variant calling, repeat/transposon analysis, and functional annotation.
+This repository contains the Nextflow DSL2 workflow used for comparative genomic analyses of local *Fusarium oxysporum* isolates together with publicly available genomes. The pipeline integrates genome assembly, scaffolding, repeat masking, gene transfer, variant calling, secretome prediction, effector analysis, and functional annotation.
+
 
 ## What this pipeline does
 
-Given paired-end reads and a reference genome, the pipeline runs:
+Given paired-end Illumina reads and a reference genome, the workflow performs:
 
-1. Read QC and trimming (`FastQC`, `fastp`)
-2. Assembly and scaffolding (`megahit`, `ragtag`)
-3. Contig handling around `Chr0_RagTag` and scaffold merging
-4. Alignment and variant calling (`bowtie2`, `samtools`, `bcftools`, `SnpEff`)
-5. Assembly comparison and quality checks (`nucmer`, `mummerplot`, `QUAST`, `LAST`)
-6. Repeat discovery/masking and TE analysis (`RepeatModeler`, `RepeatMasker`, `McClintock`)
-7. Gene prediction/transfer (`AUGUSTUS`, `Liftoff`)
-8. Functional analyses (`antiSMASH`, `BLASTp` vs MEROPS, `dbCAN`, `TargetP`, `SignalP`, `WoLFPSort`, optional `DeepTMHMM`)
+- Read quality control and trimming
+- De novo genome assembly and reference-guided scaffolding
+- Whole-genome alignment and assembly quality evaluation
+- Repeat and transposable element discovery
+- Reference-guided gene transfer and protein extraction
+- Variant calling and functional impact prediction
+- Secretome and effector prediction
+- CAZyme and functional annotation
+- SIX gene screening
 
-Main entrypoint: `main.nf`  
+The workflow was primarily developed for analyses of local *Fusarium oxysporum f. sp. lycopersici* (Fol) isolates using the Fol4287 reference genome.
+
+---
+
+# Main workflow structure
+
+Main entrypoint:
+
+```text
+main.nf
+
 Sub-workflows:
 - `workflows/preprocess_assembly.nf`
 - `workflows/alignment_variant_calling.nf`
 
-## Repository layout
+Additional modules and utility scripts are organized under:
+modules/
+utilities/
+```
+
+# Workflow summary
+1. Read QC and trimming:Raw Illumina paired-end reads are filtered and quality-controlled before downstream analyses.
+
+### Tools
+
+-FastQC
+-fastp
+
+### Outputs
+
+```text
+fastqc/
+fastp/
+```
+---
+
+2. Genome assembly and scaffolding:Reads are assembled de novo and scaffolded against the Fol4287 reference genome.
+
+### Tools
+
+-MEGAHIT
+-RagTag
+-QUAST
+-LAST
+-nucmer
+-mummerplot
+
+### Workflow
+
+```text
+fastp → MEGAHIT → RagTag → QUAST → LAST/nucmer
+```
+
+### Outputs
+
+```text
+assembly/
+ragtag/
+chr0_contigs/
+quast/
+synteny/
+```
+
+---
+
+3. Repeat and transposable element analysis:Repeat regions and transposable elements are identified and summarized across genomes.
+
+### Tools
+
+-RepeatModeler
+-RepeatMasker
+-McClintock (optional)
+
+### Workflow
+
+```text
+RepeatModeler → RepeatMasker → TE analysis
+```
+
+### Outputs
+
+```text
+repeatmodeler/
+repeatmasker/
+mcclintock/
+te_summary/
+```
+
+---
+
+4. Gene transfer and annotation:Reference-guided gene transfer and protein extraction are performed using the Fol4287 annotation.
+
+### Tools 
+
+-Liftoff
+-AUGUSTUS
+-AGAT
+
+### Outputs
+
+```text
+liftoff/
+augustus/
+proteins/
+```
+
+5. Variant calling and functional impact analysis:Reference-based variant analyses are performed by mapping reads to the Fol4287 reference genome.
+
+### Tools
+
+- Bowtie2
+- samtools
+- bcftools
+- mosdepth
+- SnpEff
+
+### Workflow
+
+```text
+Bowtie2 → samtools → bcftools → callable filtering → SnpEff
+```
+
+### Outputs
+
+```text
+alignment/
+samtools/
+bcftools/
+coverage/
+callable/
+snpeff/
+```
+
+---
+
+6. Functional annotation and secretome analysis:Predicted proteins are analyzed to identify secreted proteins, candidate effectors, and carbohydrate-active enzymes.
+
+
+### Tools
+
+- SignalP
+- TargetP
+- WoLFPSort
+- EffectorP
+- dbCAN
+- antiSMASH
+- BLASTp vs MEROPS
+- eggNOG-mapper
+- DeepTMHMM (optional)
+
+### Workflow
+
+```text
+Protein FASTA → SignalP/TargetP/WoLFPSort → secretome prediction
+Protein FASTA → EffectorP → effector prediction
+Protein FASTA → dbCAN → CAZyme annotation
+Protein FASTA → antiSMASH → secondary metabolite prediction
+Protein FASTA → BLASTp vs MEROPS → protease annotation
+```
+
+### Outputs
+
+```text
+signalp/
+targetp/
+wolfpsort/
+effectorp/
+dbcan/
+antismash/
+blastp/
+eggnog/
+deeptmhmm/
+```
+
+7. SIX gene analysis:SIX homologs are identified using BLAST-based homology searches against genome assemblies.
+
+### Tools
+
+- BLAST+
+- tblastn
+
+### Workflow
+
+```text
+SIX queries → tblastn → filtering → presence/absence matrix
+```
+
+
+# Repository layout
 
 ```text
 FoxGenome_wd/
@@ -32,7 +217,7 @@ FoxGenome_wd/
 ├── ref/
 ├── sample_reads/
 ├── samplesheet.csv
-└── run.sh
+└── run.sh 
 ```
 
 ## Requirements
@@ -96,7 +281,10 @@ Results are published under `${output_dir}` (default `results`) by analysis type
 - `targetp/`, `signalp/`, `wolfpsort/`, `deeptmhmm/` (if enabled)
 
 ## Notes
-
+- The workflow was developed for comparative genomics analyses of Fusarium oxysporum isolates.
+- Fol4287 was used as the primary reference genome.
+- BUSCO-based phylogenomics analyses are documented separately.
+- Multiple conda environments are used internally by different workflow processes.
+- Optional branches are controlled through parameters in nextflow.config.
 - `workflows/functional_annotation.nf` is present but not called by `main.nf`.
-- The pipeline uses multiple conda environments inside process scripts.
 - Slack notification is sent on completion if `SLACK_WEBHOOK` is set.
